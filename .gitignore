@@ -1,0 +1,29 @@
+# Secrets and credentials
+.env
+*.pem
+*.key
+*credentials*
+*accessKeys*.csv
+.aws/
+
+# Terraform state and providers
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# Packet captures and Wi-Fi surveys
+*.pcap
+*.pcapng
+*.cap
+*.kismet
+
+# Malware samples
+*.zip
+*.7z
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
