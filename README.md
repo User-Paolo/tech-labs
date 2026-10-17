@@ -8,6 +8,7 @@ If you're working through the same material, feel free to look around and compar
 | Lab | Track | Topics | Status |
 |---|---|---|---|
 | [01 AWS account hardening and audit](cloud/01-aws-account-hardening/) | Cloud | IAM, MFA, least privilege, Budgets, CloudTrail, S3 Block Public Access | Done |
+| [02 Security alerts](cloud/02-security-alerts/) | Cloud | CloudTrail, EventBridge, SNS, cross region forwarding | Done |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.
