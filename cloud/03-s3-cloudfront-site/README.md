@@ -134,6 +134,54 @@ $ for i in 1 2 3; do curl -s -D - -o /dev/null https://d111111abcdef8.cloudfront
 
 Athens missed the first time even though Dulles already had the page. Every edge location keeps its own cache, so the first visitor near each one pays for the trip to S3 and everyone after gets it from the edge. Athens counts as Europe, so it's part of price class 100.
 
+### 5. Changing the site
+This is the part I was most curious about. I changed the badge to Version 2 and uploaded it without clearing anything, then refreshed the page. Then I ran the invalidation and refreshed again.
+```
+$ sed -i 's/Version 1/Version 2/' tech-labs/cloud/03-s3-cloudfront-site/site/index.html && bash tech-labs/cloud/03-s3-cloudfront-site/deploy.sh $BUCKET
+upload: site/index.html to s3://lab03-site-9b14af/index.html
+$ bash tech-labs/cloud/03-s3-cloudfront-site/deploy.sh $BUCKET $DIST && aws cloudfront wait invalidation-completed --distribution-id $DIST --id $(aws cloudfront list-invalidations --distribution-id $DIST --query 'InvalidationList.Items[0].Id' --output text) && echo invalidation done
+I8HNAC898VSILFWK1KPLRXUS5L      InProgress
+invalidation done
+```
+
+![Version 1 stays until the invalidation](images/cache-invalidation.gif)
+
+The GIF is cropped to the page and CloudShell, so you can't see it, but every time it goes back to the page I pressed Ctrl+F5. That skips the browser's own cache, so whatever shows up came from CloudFront. After the upload S3 already had Version 2 and CloudFront kept handing out Version 1 anyway. Only after the invalidation did Version 2 show up.
+
+Left alone it would have stayed like that for a while. The cache settings I picked keep things for 24 hours by default when S3 doesn't say otherwise. The other way around it is to give changed files new names, like `style.v2.css`, so there's nothing old to serve, but for one tiny page an invalidation is fine and the first 1,000 paths a month are free.
+
+### 6. Why the 403 didn't set off an alert
+My alerts from lab 02 are still running and the direct S3 request in step 4 got denied, but no email came. I wanted to know why.
+```
+$ aws cloudtrail get-event-selectors --trail-name management-events --query '{Selectors:EventSelectors,Advanced:AdvancedEventSelectors}'
+{
+    "Selectors": null,
+    "Advanced": [
+        {
+            "Name": "Management events selector",
+            "FieldSelectors": [
+                {
+                    "Field": "eventCategory",
+                    "Equals": [
+                        "Management"
+                    ]
+                }
+            ]
+        }
+    ]
+}
+$ aws cloudtrail lookup-events --region us-east-1 --lookup-attributes AttributeKey=EventName,AttributeValue=GetObject --max-results 5 --query 'length(Events)'
+0
+```
+My trail only records management events, things like creating a bucket or changing a policy. Reading a file out of a bucket is a data event, and those aren't recorded unless you ask for them. So there's no `GetObject` in CloudTrail at all, not my denied one and not the hundreds CloudFront made. No record means nothing for the alert to match. Data events cost extra, about $0.10 per 100,000, which is why they're off by default.
+
+### 7. What's still running
+The bucket and the distribution. Lab 04 builds on the same bucket, and an idle distribution costs nothing.
+
 ## What Broke and How I Fixed It
 
 **The cache never hit.** My first cache test used `curl -sI`, and every request came back as `Miss from cloudfront`, even right after each other. `-I` sends a HEAD request, which only asks for the headers. On a miss CloudFront passes the HEAD on to S3, but there's no body in the answer to keep, so nothing gets cached and the next HEAD misses again. Switching to a normal GET with `curl -s -D - -o /dev/null`, which prints the headers and throws the page away, gave Miss and then Hit like it should.
+
+**My browser showed Version 2 straight away.** The first time I tried the cache test, I uploaded Version 2, hit Ctrl+F5 and Version 2 was just there. Meanwhile curl from my PC still got Version 1 from `ATH51-P1` with `age: 865`, so CloudFront was caching fine. My browser most likely got sent to a different edge than curl, one that had never cached Version 1, so it went to S3 and got the new file. Couldn't see which one without the headers. To make it show up properly I put Version 1 back with an invalidation, loaded the page in the browser a couple of times so its edge had Version 1, and then did the test again.
+
+**An IAM change alert for nothing.** At 16:01 UTC, while I was making the distribution, lab 02 emailed me an IAM change for `SimulatePrincipalPolicy`. That's the IAM policy simulator. My guess is the CloudFront console used it to check I was allowed to write the bucket policy before doing it. It doesn't change anything, but CloudTrail doesn't count it as read only, so my IAM rule caught it. Harmless, just noise. If it gets annoying I can exclude `Simulate` calls in the lab 02 rule.
