@@ -124,6 +124,131 @@ $ curl -s -o /dev/null -w '%{http_code}\n' https://d111111abcdef8.cloudfront.net
 ```
 Gone from S3 and gone from the site.
 
+### 4. The lifecycle rule
+```
+$ aws s3api put-bucket-lifecycle-configuration --bucket $BUCKET --lifecycle-configuration file://tech-labs/cloud/04-s3-in-depth/lifecycle.json
+{
+    "TransitionDefaultMinimumObjectSize": "all_storage_classes_128K"
+}
+$ aws s3api get-bucket-lifecycle-configuration --bucket $BUCKET --query 'Rules[].{ID:ID,Status:Status,OldVersionsAfterDays:NoncurrentVersionExpiration.NoncurrentDays}' --output table
+----------------------------------------------------------------
+|               GetBucketLifecycleConfiguration                |
++-------------------------+------------------------+-----------+
+|            ID           |  OldVersionsAfterDays  |   Status  |
++-------------------------+------------------------+-----------+
+|  clean-up-old-versions  |  1                     |  Enabled  |
++-------------------------+------------------------+-----------+
+$ aws s3api list-object-versions --bucket $BUCKET --query 'Versions[?IsLatest==`false`].[Key,VersionId,LastModified]' --output table
+--------------------------------------------------------------------------------------
+|                                 ListObjectVersions                                 |
++-----------------+------------------------------------+-----------------------------+
+|  index.html     |  Of5DIASUe9YHBgF_.Azt3xg71QnnwztQ  |  2026-10-19T17:36:22+00:00  |
+|  index.html     |  null                              |  2026-10-18T16:46:17+00:00  |
+|  lab04/old.txt  |  LZdSuNA8hNDzSTJwB.nOosWfAesTYSOe  |  2026-10-19T17:55:26+00:00  |
++-----------------+------------------------------------+-----------------------------+
+```
+Those are the old versions the rule should throw away, the Oops page and the original `index.html` from before versioning. Lifecycle doesn't run right away, it goes through buckets about once a day, so I'll only see them gone tomorrow or the day after. The `old.txt` one is from the next step, I ran its upload twice by accident.
+
+I didn't expect S3 to answer when I applied the rule. `all_storage_classes_128K` means lifecycle won't move anything smaller than 128 KB to a cheaper class, since for tiny files the extra per file cost of the cheaper classes eats the savings. My rule only deletes so it doesn't matter here, but it means my whole site would never get moved anywhere even if I asked.
+
+### 5. A file in Glacier
+I uploaded a small file straight into Glacier and tried to read it:
+```
+$ echo "old stuff nobody needs often" > /tmp/old.txt && aws s3 cp /tmp/old.txt s3://$BUCKET/lab04/old.txt --storage-class GLACIER
+upload: ../../tmp/old.txt to s3://lab03-site-9b14af/lab04/old.txt
+$ aws s3api head-object --bucket $BUCKET --key lab04/old.txt --query '{Class:StorageClass,Restore:Restore}'
+{
+    "Class": "GLACIER",
+    "Restore": null
+}
+$ aws s3 cp s3://$BUCKET/lab04/old.txt -
+download failed: s3://lab03-site-9b14af/lab04/old.txt to - An error occurred (InvalidObjectState) when calling the GetObject operation: The operation is not valid for the object's storage class
+```
+So the file is there and S3 knows about it, but it can't be read. Glacier is cheap to keep things in and you pay for that when you want them back. I asked for an Expedited restore, the fast and more expensive tier, and waited:
+```
+$ aws s3api restore-object --bucket $BUCKET --key lab04/old.txt --restore-request '{"Days":1,"GlacierJobParameters":{"Tier":"Expedited"}}'
+$ while aws s3api head-object --bucket $BUCKET --key lab04/old.txt --query Restore --output text | grep -q 'ongoing-request="true"'; do sleep 20; done; date -u +%H:%M:%S
+17:58:10
+$ aws s3api head-object --bucket $BUCKET --key lab04/old.txt --query '{Class:StorageClass,Restore:Restore}'
+{
+    "Class": "GLACIER",
+    "Restore": "ongoing-request=\"false\", expiry-date=\"Wed, 21 Oct 2026 00:00:00 GMT\""
+}
+$ aws s3 cp s3://$BUCKET/lab04/old.txt -
+old stuff nobody needs often
+```
+It took somewhere around 2 or 3 minutes. I forgot to print the time right before the request so I only know it from the upload at 17:55. The file itself stays in Glacier, the restore just makes a temporary copy I can read. I asked for 1 day and AWS rounded it up to the next midnight. The standard tier would have been hours instead of minutes, and Deep Archive is even slower.
+
+### 6. Object Lock
+A second bucket with Object Lock switched on, and one file locked until tomorrow in governance mode:
+```
+$ LOCK=lab04-lock-$(openssl rand -hex 3); echo $LOCK
+lab04-lock-dfae1b
+$ aws s3api create-bucket --bucket $LOCK --region us-east-1 --object-lock-enabled-for-bucket
+{
+    "Location": "/lab04-lock-dfae1b",
+    "BucketArn": "arn:aws:s3:::lab04-lock-dfae1b"
+}
+$ aws s3api get-object-lock-configuration --bucket $LOCK
+{
+    "ObjectLockConfiguration": {
+        "ObjectLockEnabled": "Enabled"
+    }
+}
+$ aws s3api get-bucket-versioning --bucket $LOCK
+{
+    "Status": "Enabled",
+    "MFADelete": "Disabled"
+}
+$ echo "keep me" > /tmp/locked.txt
+$ aws s3api put-object --bucket $LOCK --key locked.txt --body /tmp/locked.txt --object-lock-mode GOVERNANCE --object-lock-retain-until-date $(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ) --query VersionId --output text
+eS92fURns821c9OaNGGyo1G2mdl_1GdH
+$ VID=$(aws s3api list-object-versions --bucket $LOCK --prefix locked.txt --query 'Versions[0].VersionId' --output text)
+$ aws s3api get-object-retention --bucket $LOCK --key locked.txt --version-id $VID
+{
+    "Retention": {
+        "Mode": "GOVERNANCE",
+        "RetainUntilDate": "2026-10-20T17:59:55+00:00"
+    }
+}
+```
+Versioning switched itself on, Object Lock doesn't work without it. Then I tried to delete it, twice:
+```
+$ aws s3api delete-object --bucket $LOCK --key locked.txt
+{
+    "DeleteMarker": true,
+    "VersionId": "IhXJbJYLQoz2SFtL7w2x068AfC1EeAHZ"
+}
+$ aws s3api delete-object --bucket $LOCK --key locked.txt --version-id $VID
+aws: [ERROR]: An error occurred (AccessDenied) when calling the DeleteObject operation: Access Denied because object protected by object lock.
+```
+The first one surprised me for a second. A plain delete worked fine. But it only put a delete marker on top, same as in step 2, and the locked version was still sitting underneath. The lock protects the version, not the name. Deleting the actual version is what got denied.
+
+Governance mode has a way out though. A user with the `s3:BypassGovernanceRetention` permission can still delete it, and my admin user has that through `AdministratorAccess`:
+```
+$ aws s3api delete-object --bucket $LOCK --key locked.txt --version-id $VID --bypass-governance-retention
+{
+    "VersionId": "eS92fURns821c9OaNGGyo1G2mdl_1GdH"
+}
+```
+That's the difference from compliance mode. In compliance mode nobody gets past it, not an admin and not root, until the date runs out. Which is also why I didn't touch compliance mode for a test.
+
+No email from my lab 02 alerts for that AccessDenied either. Same reason as the 403 in lab 03, deleting an object is a data event and my trail doesn't record those.
+
+### 7. Cleanup
+```
+$ aws s3api delete-object --bucket $LOCK --key locked.txt --version-id $(aws s3api list-object-versions --bucket $LOCK --query 'DeleteMarkers[0].VersionId' --output text) >/dev/null
+$ aws s3api delete-bucket --bucket $LOCK && echo "lock bucket deleted"
+lock bucket deleted
+$ for v in $(aws s3api list-object-versions --bucket $BUCKET --prefix lab04/ --query 'Versions[].VersionId' --output text); do aws s3api delete-object --bucket $BUCKET --key lab04/old.txt --version-id $v >/dev/null; done
+$ aws s3api list-object-versions --bucket $BUCKET --prefix lab04/ --query '{Versions:Versions,DeleteMarkers:DeleteMarkers}'
+{
+    "Versions": null,
+    "DeleteMarkers": null
+}
+```
+The lock bucket is gone and so is everything under `lab04/`. The site bucket stays, now with versioning on and the lifecycle rule keeping the old versions in check.
+
 ## What Broke and How I Fixed It
 
 **`git pull` in CloudShell refused to run.** My copy of the repo in CloudShell still had the `sed` edit from lab 03 where I changed the badge to Version 2. The repo had the same change committed by then, and git wouldn't overwrite my local one. Since the pull failed, the `cd ~` after it never ran either. `git checkout -- cloud/03-s3-cloudfront-site/site/index.html` threw away the local edit and the pull went through.
