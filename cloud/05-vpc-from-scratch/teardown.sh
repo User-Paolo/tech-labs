@@ -33,7 +33,7 @@ if [ "$VPC" != "None" ]; then
   for s in $(aws ec2 describe-subnets --filters Name=vpc-id,Values="$VPC" --query 'Subnets[].SubnetId' --output text); do
     aws ec2 delete-subnet --subnet-id "$s" && echo "deleted: $s"
   done
-  for r in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values="$VPC" --query 'RouteTables[?!Associations[?Main]].RouteTableId' --output text); do
+  for r in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values="$VPC" --query 'RouteTables[?!(Associations[?Main])].RouteTableId' --output text); do
     aws ec2 delete-route-table --route-table-id "$r" && echo "deleted: $r"
   done
   for n in $(aws ec2 describe-network-acls --filters Name=vpc-id,Values="$VPC" --query 'NetworkAcls[?!IsDefault].NetworkAclId' --output text); do
@@ -44,7 +44,7 @@ if [ "$VPC" != "None" ]; then
     rules=$(aws ec2 describe-security-groups --group-ids "$g" --query 'SecurityGroups[0].IpPermissions' --output json)
     [ "$rules" != "[]" ] && aws ec2 revoke-security-group-ingress --group-id "$g" --ip-permissions "$rules" >/dev/null
   done
-  for g in $sgs; do aws ec2 delete-security-group --group-id "$g" && echo "deleted: $g"; done
+  for g in $sgs; do aws ec2 delete-security-group --group-id "$g" >/dev/null && echo "deleted: $g"; done
   aws ec2 delete-vpc --vpc-id "$VPC" && echo "deleted: $VPC"
 fi
 

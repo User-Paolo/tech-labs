@@ -139,4 +139,101 @@ Web to app works over the private IP because of the security group rule from ste
 
 Three route tables, though I only made two. The unnamed one is the main route table every VPC comes with. All four subnets are attached to mine on purpose, so it's not used for anything. If I'd forgotten to attach a subnet it would have landed on the main table without me noticing.
 
+### 8. NAT gateway
+Part 2. The NAT gateway goes in a public subnet, because it needs the internet gateway route itself, and it gets an Elastic IP.
+```
+$ EIP=$(aws ec2 allocate-address --domain vpc --tag-specifications "$(T elastic-ip lab05-nat-eip)" --query AllocationId --output text)
+$ NAT=$(aws ec2 create-nat-gateway --subnet-id $PUB_A --allocation-id $EIP --tag-specifications "$(T natgateway lab05-nat)" --query NatGateway.NatGatewayId --output text)
+$ aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT && echo nat ready
+nat ready
+$ aws ec2 create-route --route-table-id $RT_PRIV --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT
+$ aws ec2 describe-route-tables --route-table-ids $RT_PRIV --query 'RouteTables[0].Routes[].[DestinationCidrBlock,GatewayId,NatGatewayId]' --output text
+10.0.0.0/16     local   None
+0.0.0.0/0       None    nat-08f8943eb72d8ce47
+$ aws ec2 describe-addresses --allocation-ids $EIP --query 'Addresses[0].PublicIp' --output text
+184.197.144.27
+```
+One new line in the private route table and that's the whole change.
+
+### 9. The app server comes online
+After a reboot (see What Broke) the app server finally showed up in Session Manager:
+```
+$ aws ssm describe-instance-information --query 'InstanceInformationList[].[InstanceId,PingStatus]' --output text
+i-0bbfbde8eecd9b5fde    Online
+i-08bc538a6d51ba0c2     Online
+$ aws ssm start-session --target $APP
+sh-5.2$ curl -s -m 5 https://checkip.amazonaws.com
+184.197.144.27
+sh-5.2$ curl -s -m 5 http://10.0.1.95 || echo "timed out"
+timed out
+sh-5.2$ exit
+```
+It goes out to the internet as the NAT's Elastic IP. It still has no public IP of its own, so nothing on the internet can start a connection to it. Outbound only.
+
+The second curl is the app server calling the web server, and it got dropped. The web security group only lets in my IP, and that applies inside the VPC too. Being in the same VPC doesn't get you anything for free.
+
+### 10. Security group vs network ACL
+I made a new NACL for public a, where the web server lives. A new NACL denies everything until you add rules. I added port 80 in from my IP and port 80 out to my IP, which looks right at first glance. Then I changed one thing at a time and tested from a PowerShell window on my PC, since only my IP gets in:
+```
+PS> curl.exe -s -m 5 http://44.204.111.115; "exit $LASTEXITCODE"
+```
+`exit 0` with the page means it worked. `exit 28` is curl giving up after 5 seconds.
+
+| # | NACL on public a | Result |
+|---|---|---|
+| 1 | In: allow 80. Out: allow 80 | `exit 28` |
+| 2 | Out: add allow 1024 to 65535 | `exit 0` |
+| 3 | In: add deny 80 from my IP as rule 200 | `exit 0` |
+| 4 | In: move the deny to rule 90 | `exit 28` |
+| 5 | Back to the default NACL | `exit 0` |
+
+```
+$ aws ec2 describe-network-acls --network-acl-ids $NACL --query 'NetworkAcls[0].Entries[?!Egress].[RuleNumber,RuleAction,PortRange.From]' --output table
+|  90   |  deny   |  80    |
+|  100  |  allow  |  80    |
+|  32767|  deny   |  None  |
+```
+
+Test 1 was the one I was looking for. The request reaches the server on port 80, but the reply goes back to whatever random high port my PC picked, something between 49152 and 65535. A security group is stateful, it remembers the connection and lets the reply out on its own. A NACL is stateless and checks the reply like a brand new packet, and port 80 out doesn't match it. Allowing 1024 to 65535 out fixed it. That's the standard range for ephemeral ports, and it covers Windows, Linux and the NAT gateway.
+
+Tests 3 and 4 are the rule order. NACL rules get checked from the lowest number up and the first match wins. At 200 the deny never got a look in because allow 100 matched first. At 90 it matched first and blocked me, even though the web security group still allowed my IP. The NACL sits at the edge of the subnet, so the request never even got to the security group.
+
+So the difference in short. Security groups only allow, belong to an instance and remember connections. NACLs can deny, cover a whole subnet and remember nothing. A NACL deny is how you'd block one bad IP for everything in a subnet. Doing all your allowing in NACLs is a pain because of the ephemeral ports.
+
+While my test NACL was on public a it also cut off the NAT gateway, which lives in the same subnet. Everything except port 80 to and from my IP got dropped, so for those few minutes the app server lost its internet too.
+
+### 11. Teardown
+```
+$ bash ~/tech-labs/cloud/05-vpc-from-scratch/teardown.sh
+terminated: i-0bbfbde8eecd9b5fde i-08bc538a6d51ba0c2
+deleted: nat-08f8943eb72d8ce47
+released: eipalloc-0a651a79c7bf72aaa
+deleted: igw-019ce979ce127fb48
+deleted: subnet-04b147d1ee66d5842
+deleted: subnet-0dcf6dbb8ddadb80f
+deleted: subnet-06be1a96f0ba0f625
+deleted: subnet-0254e073d67c8de49
+deleted: acl-02d26c0412ddcbdb3
+deleted: sg-093c7e6d68dc03ebc
+deleted: sg-0b0bd909468dc2ed3
+deleted: rtb-063f1f414da8fed88
+deleted: rtb-01e6e97fdddb7f362
+deleted: vpc-04d2d698afc53324e
+deleted: role and instance profile lab05-ssm
+$ aws ec2 describe-vpcs --filters Name=tag:Lab,Values=05 --query 'Vpcs[].VpcId' --output text
+$ aws ec2 describe-addresses --query 'Addresses[].PublicIp' --output text
+$ aws ec2 describe-nat-gateways --filter Name=state,Values=pending,available --query 'NatGateways[].NatGatewayId' --output text
+$ aws iam get-role --role-name lab05-ssm 2>&1 | tail -1
+aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name lab05-ssm cannot be found.
+```
+That's the output put together from two runs, see What Broke. The NAT gateway and the Elastic IP were the only things costing real money, and both are gone. The order matters. Instances before the subnets they're in, the NAT gateway before its Elastic IP, and everything inside the VPC before the VPC itself. Lab 02 sent another round of IAM change emails for the role.
+
 ## What Broke and How I Fixed It
+
+**The app server didn't show up after I added the NAT gateway.** The route was there and the NAT was available, but `start-session` said `TargetNotConnected` and the app server still wasn't in the Session Manager list. My guess is the SSM agent had spent the whole of part 1 failing to reach the internet and was backing off longer and longer between retries. I rebooted the instance so the agent started fresh, and two minutes later it was Online.
+
+**My first round of NACL tests proved nothing.** I ran all the rule changes and the restore one after the other, and only curled from PowerShell at the end, so every test said `exit 0`. When I tried again, putting the default NACL back failed with `InvalidAssociationID.NotFound`. Every time you swap a subnet's NACL the association gets a new ID and the old one stops existing. My saved ID was from before the first restore, so the NACL wasn't even attached anymore, which also explains why everything worked. I attached it again, looked up the current association ID right before restoring instead of trusting the saved one, and did one change then one curl at a time. That's the table in step 10.
+
+**Teardown left the VPC behind.** The first run ended with `DependencyViolation` on `DeleteVpc`, and there were no `deleted: rtb-` lines in the output. The two route tables were still there. The filter that's supposed to skip the main route table was `RouteTables[?!Associations[?Main]]`, and the `!` grabs `Associations` before the filter runs, so it matched no tables at all. `RouteTables[?!(Associations[?Main])]` with the brackets matched both of mine. I fixed it in [teardown.sh](teardown.sh) and ran it again, which deleted the two route tables and the VPC.
+
+**CloudShell kept forgetting my variables.** It restarts after about 20 minutes of doing nothing and every `$VPC` and `$NACL` goes with it. That's why I kept saving IDs to `~/lab05.env` as I went. After a restart, `source ~/lab05.env` brought them back. My IP I set again by hand each time so it never ended up in a file.

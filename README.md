@@ -11,7 +11,7 @@ If you're working through the same material, feel free to look around and compar
 | [02 Security alerts](cloud/02-security-alerts/) | Cloud | CloudTrail, EventBridge, SNS, cross region forwarding | Done |
 | [03 Static site with S3 and CloudFront](cloud/03-s3-cloudfront-site/) | Cloud | S3, CloudFront, OAC, edge locations, caching | Done |
 | [04 S3 in depth](cloud/04-s3-in-depth/) | Cloud | Versioning, delete markers, presigned URLs, lifecycle, storage classes, Object Lock | Done |
-| [05 VPC from scratch](cloud/05-vpc-from-scratch/) | Cloud | VPC, subnets, route tables, IGW, NAT, security groups, NACLs, Session Manager | In progress |
+| [05 VPC from scratch](cloud/05-vpc-from-scratch/) | Cloud | VPC, subnets, route tables, IGW, NAT, security groups, NACLs, Session Manager | Done |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.
