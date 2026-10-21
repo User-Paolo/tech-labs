@@ -1,0 +1,43 @@
+name: lab 06 terraform
+
+on:
+  push:
+    paths:
+      - "cloud/06-vpc-terraform/**"
+      - ".github/workflows/lab06-terraform.yml"
+  pull_request:
+    paths:
+      - "cloud/06-vpc-terraform/**"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud/06-vpc-terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+
+      - name: terraform validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: checkov
+        run: |
+          pip install -q checkov==3.3.30
+          checkov -d . --framework terraform --compact

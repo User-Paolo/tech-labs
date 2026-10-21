@@ -1,4 +1,5 @@
 resource "aws_security_group" "web" {
+  #checkov:skip=CKV2_AWS_5:Attached to the web instance through local.instances
   name        = "lab06-web"
   description = "web, port 80 from my IP"
   vpc_id      = aws_vpc.main.id
@@ -9,12 +10,22 @@ resource "aws_security_group" "web" {
 }
 
 resource "aws_security_group" "app" {
+  #checkov:skip=CKV2_AWS_5:Attached to the app instance through local.instances
   name        = "lab06-app"
   description = "app, port 80 from the web SG only"
   vpc_id      = aws_vpc.main.id
 
   tags = {
     Name = "lab06-app"
+  }
+}
+
+# No rules at all, so nothing can use the default group by accident
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "lab06-default-locked"
   }
 }
 
@@ -28,6 +39,7 @@ resource "aws_vpc_security_group_ingress_rule" "web_http" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "app_http" {
+  #checkov:skip=CKV_AWS_260:The source is the web security group, not 0.0.0.0/0
   security_group_id            = aws_security_group.app.id
   description                  = "http from the web SG"
   ip_protocol                  = "tcp"

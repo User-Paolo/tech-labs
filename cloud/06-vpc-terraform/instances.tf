@@ -18,6 +18,12 @@ resource "aws_instance" "this" {
   vpc_security_group_ids = [each.value.sg]
   iam_instance_profile   = aws_iam_instance_profile.ssm.name
   user_data              = file("${path.module}/web.sh")
+  monitoring             = true
+  ebs_optimized          = true
+
+  root_block_device {
+    encrypted = true
+  }
 
   metadata_options {
     http_tokens = "required"

@@ -8,6 +8,7 @@ locals {
 }
 
 resource "aws_vpc" "main" {
+  #checkov:skip=CKV2_AWS_11:The network only lives a few hours, flow logs come in the monitoring lab
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
 
@@ -17,6 +18,7 @@ resource "aws_vpc" "main" {
 }
 
 resource "aws_subnet" "this" {
+  #checkov:skip=CKV_AWS_130:The public subnets hand out public IPs on purpose
   for_each = local.subnets
 
   vpc_id                  = aws_vpc.main.id
@@ -106,6 +108,11 @@ resource "aws_network_acl" "public" {
 }
 
 resource "aws_network_acl_rule" "allow_all" {
+  #checkov:skip=CKV_AWS_352:Allow all like the default NACL, the security groups do the filtering
+  #checkov:skip=CKV_AWS_229:Same, port 21 is closed by the security groups
+  #checkov:skip=CKV_AWS_230:Same, port 20 is closed by the security groups
+  #checkov:skip=CKV_AWS_231:Same, port 3389 is closed by the security groups
+  #checkov:skip=CKV_AWS_232:Same, port 22 is closed by the security groups
   for_each = { in = false, out = true }
 
   network_acl_id = aws_network_acl.public.id
