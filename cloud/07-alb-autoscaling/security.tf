@@ -45,6 +45,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_web" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "web_from_alb" {
+  #checkov:skip=CKV_AWS_260:The source is the load balancer's security group, not 0.0.0.0/0
   security_group_id            = aws_security_group.web.id
   description                  = "http from the load balancer"
   ip_protocol                  = "tcp"

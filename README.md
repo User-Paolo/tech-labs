@@ -13,7 +13,7 @@ If you're working through the same material, feel free to look around and compar
 | [04 S3 in depth](cloud/04-s3-in-depth/) | Cloud | Versioning, delete markers, presigned URLs, lifecycle, storage classes, Object Lock | Done |
 | [05 VPC from scratch](cloud/05-vpc-from-scratch/) | Cloud | VPC, subnets, route tables, IGW, NAT, security groups, NACLs, Session Manager | Done |
 | [06 VPC in Terraform](cloud/06-vpc-terraform/) | Cloud | Terraform, infrastructure as code, checkov, GitHub Actions | Done |
-| [07 Load balancer and Auto Scaling](cloud/07-alb-autoscaling/) | Cloud | EC2, launch templates, Auto Scaling, Application Load Balancer, health checks, rolling updates | In progress |
+| [07 Load balancer and Auto Scaling](cloud/07-alb-autoscaling/) | Cloud | EC2, launch templates, Auto Scaling, Application Load Balancer, health checks, rolling updates | Done |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.
