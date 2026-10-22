@@ -151,6 +151,8 @@ Those are the old versions the rule should throw away, the Oops page and the ori
 
 I didn't expect S3 to answer when I applied the rule. `all_storage_classes_128K` means lifecycle won't move anything smaller than 128 KB to a cheaper class, since for tiny files the extra per file cost of the cheaper classes eats the savings. My rule only deletes so it doesn't matter here, but it means my whole site would never get moved anywhere even if I asked.
 
+Update on 22 Oct: they're gone. On the 21st both old `index.html` versions were still there, and a day later the same command printed nothing. So "about once a day" really means a day or two after they become eligible.
+
 ### 5. A file in Glacier
 I uploaded a small file straight into Glacier and tried to read it:
 ```

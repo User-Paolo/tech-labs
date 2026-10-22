@@ -1,0 +1,7 @@
+#!/bin/bash
+# EC2 user data, serves a page with the version, the instance and its AZ
+TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+mkdir -p /srv/www
+echo "<h1>lab07 ${version} $(hostname -s) $AZ</h1>" > /srv/www/index.html
+cd /srv/www && nohup python3 -m http.server 80 >/dev/null 2>&1 &
