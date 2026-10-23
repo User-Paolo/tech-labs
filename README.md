@@ -14,6 +14,7 @@ If you're working through the same material, feel free to look around and compar
 | [05 VPC from scratch](cloud/05-vpc-from-scratch/) | Cloud | VPC, subnets, route tables, IGW, NAT, security groups, NACLs, Session Manager | Done |
 | [06 VPC in Terraform](cloud/06-vpc-terraform/) | Cloud | Terraform, infrastructure as code, checkov, GitHub Actions | Done |
 | [07 Load balancer and Auto Scaling](cloud/07-alb-autoscaling/) | Cloud | EC2, launch templates, Auto Scaling, Application Load Balancer, health checks, rolling updates | Done |
+| [08 My own AWS bill](cloud/08-billing-and-costs/) | Cloud | Free plan credits, Cost Explorer, cost allocation tags, Budgets, Cost Anomaly Detection, pricing models | In progress |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.
