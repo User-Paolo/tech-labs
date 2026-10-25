@@ -15,6 +15,7 @@ If you're working through the same material, feel free to look around and compar
 | [06 VPC in Terraform](cloud/06-vpc-terraform/) | Cloud | Terraform, infrastructure as code, checkov, GitHub Actions | Done |
 | [07 Load balancer and Auto Scaling](cloud/07-alb-autoscaling/) | Cloud | EC2, launch templates, Auto Scaling, Application Load Balancer, health checks, rolling updates | Done |
 | [08 My own AWS bill](cloud/08-billing-and-costs/) | Cloud | Free plan credits, Cost Explorer, cost allocation tags, Budgets, Cost Anomaly Detection, pricing models | Done |
+| [09 Security services tour](cloud/09-security-services/) | Cloud | Trusted Advisor, IAM Access Analyzer, Artifact, GuardDuty, Inspector, Macie, Config, Security Hub | In progress |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.

@@ -1,0 +1,6 @@
+customer_name,email,phone,date_of_birth,address,credit_card_number,card_expiry
+Jane Example,jane.example@example.com,+1 202 555 0143,1985-04-12,"100 Main Street, Springfield, IL 62701",4111111111111111,04/29
+John Sample,john.sample@example.com,+1 312 555 0187,1979-11-03,"42 Oak Avenue, Portland, OR 97201",5555555555554444,11/28
+Maria Testing,maria.testing@example.org,+1 415 555 0119,1992-07-21,"7 Harbor Road, Boston, MA 02110",378282246310005,07/30
+Ahmed Placeholder,ahmed.placeholder@example.net,+1 646 555 0162,1988-01-30,"350 Pine Street, Denver, CO 80202",6011111111111117,01/27
+Li Fictional,li.fictional@example.com,+1 213 555 0175,1995-09-08,"18 Cedar Lane, Austin, TX 73301",4012888888881881,09/29
