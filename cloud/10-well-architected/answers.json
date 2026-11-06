@@ -1,0 +1,212 @@
+[
+  {
+    "pillar": "operationalExcellence",
+    "question": "priorities",
+    "choices": ["ops_priorities_eval_tradeoffs"],
+    "notes": "No customers or compliance rules here. I did weigh tradeoffs though, every checkov skip in lab 07 has a reason written next to it."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "ops-model",
+    "choices": ["ops_ops_model_def_resource_owners", "ops_ops_model_def_proc_owners", "ops_ops_model_def_activity_owners"],
+    "notes": "I'm the only person so I own all of it. Every resource has a Lab tag. There are no teams to agree anything with."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "org-culture",
+    "applicable": false,
+    "notes": "One person, no organization."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "observability",
+    "choices": ["ops_telemetry_no"],
+    "notes": "Detailed monitoring was switched on but I never defined what healthy means or looked at a metric. Lab 11 is for this."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "dev-integ",
+    "choices": ["ops_dev_integ_version_control", "ops_dev_integ_test_val_chg", "ops_dev_integ_conf_mgmt_sys", "ops_dev_integ_code_quality", "ops_dev_integ_freq_sm_rev_chg"],
+    "notes": "Terraform in git with fmt, validate and checkov on every push. Applying is still by hand from CloudShell, and there's only one environment. Nothing patches the instances on a schedule."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "mit-deploy-risks",
+    "choices": ["ops_mit_deploy_risks_test_val_chg", "ops_mit_deploy_risks_deploy_mgmt_sys"],
+    "notes": "The rolling update starts new instances before removing old ones and I watched it with a curl loop. There's no automatic rollback if a bad version goes out, and I never tested going back."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "ready-to-support",
+    "choices": ["ops_ready_to_support_use_runbooks", "ops_ready_to_support_informed_deploy_decisions"],
+    "notes": "The README works as a runbook and I read terraform plan before every apply. No playbook for when something breaks."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "workload-observability",
+    "choices": ["ops_workload_observability_no"],
+    "notes": "No alarms, no dashboard, no logs. I only found out about the 502s because I was running curl myself."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "operations-health",
+    "choices": ["ops_operations_health_no"],
+    "notes": "Nothing measured here."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "event-response",
+    "choices": ["ops_event_response_auto_event_response"],
+    "notes": "Auto Scaling replacing a broken instance is an automated response. That's the only one, nobody gets told when it happens."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "evolve-ops",
+    "choices": ["ops_evolve_ops_perform_rca_process", "ops_evolve_ops_knowledge_management", "ops_evolve_ops_share_lessons_learned"],
+    "notes": "Every lab has a What Broke section with the actual cause, and it's all public. No metrics to review and no regular process, this review is the first time I've gone back over a lab."
+  },
+  {
+    "pillar": "security",
+    "question": "securely-operate",
+    "choices": ["sec_securely_operate_aws_account", "sec_securely_operate_automate_security_controls"],
+    "notes": "Root has MFA and no keys from lab 01, and checkov runs in CI. Everything is in one account, and I never did a threat model."
+  },
+  {
+    "pillar": "security",
+    "question": "identities",
+    "choices": ["sec_identities_enforce_mechanisms", "sec_identities_unique", "sec_identities_groups_attributes"],
+    "notes": "MFA on root and my admin user, an Admins group, no access keys. CloudShell and the instance role both use temporary credentials. Lab 07 has no secrets to store, that part comes with the database lab."
+  },
+  {
+    "pillar": "security",
+    "question": "permissions",
+    "choices": ["sec_permissions_define", "sec_permissions_analyze_cross_account"],
+    "notes": "The instance role only has the Session Manager policy and Access Analyzer stays on. I'm not ticking least privilege because my own user has AdministratorAccess. Lab 14 looks at that."
+  },
+  {
+    "pillar": "security",
+    "question": "detect-investigate-events",
+    "choices": ["sec_detect_investigate_events_logs"],
+    "notes": "CloudTrail goes to one bucket and the lab 02 alerts cover the account. The load balancer access logs and VPC flow logs were skipped in lab 07, so I can't see who actually hit the site."
+  },
+  {
+    "pillar": "security",
+    "question": "network-protection",
+    "choices": ["sec_network_protection_create_layers", "sec_network_protection_layered", "sec_network_protection_auto_protect"],
+    "notes": "Public and private subnets, security groups that reference each other, the default group locked, all of it in Terraform. No WAF, so nothing inspects the traffic."
+  },
+  {
+    "pillar": "security",
+    "question": "protect-compute",
+    "choices": ["sec_protect_compute_reduce_manual_management"],
+    "notes": "No SSH, only Session Manager, and instances get replaced instead of fixed. Inspector is blocked on the Free plan and nothing else scans them. The AMI is the stock Amazon Linux one."
+  },
+  {
+    "pillar": "security",
+    "question": "data-classification",
+    "applicable": false,
+    "notes": "The page only shows the version, the hostname and the AZ. There's no data to classify."
+  },
+  {
+    "pillar": "security",
+    "question": "protect-data-rest",
+    "choices": ["sec_protect_data_rest_encrypt"],
+    "notes": "The EBS volumes are encrypted with the default key. I don't manage any keys myself yet, that's lab 14."
+  },
+  {
+    "pillar": "security",
+    "question": "protect-data-transit",
+    "choices": ["sec_protect_data_transit_no"],
+    "notes": "Plain HTTP the whole way because I have no domain and so no certificate. It's a gap for now."
+  },
+  {
+    "pillar": "security",
+    "question": "incident-response",
+    "choices": ["sec_incident_response_no"],
+    "notes": "I have alerts but no plan for what I'd do after one fires. Lab 15 is the drill for this."
+  },
+  {
+    "pillar": "security",
+    "question": "application-security",
+    "choices": ["sec_appsec_deploy_software_programmatically", "sec_appsec_automate_testing_throughout_lifecycle"],
+    "notes": "The page deploys through user data and CI checks the Terraform on every push. Those checks look at the infrastructure and not the app. Nobody reviews my code and I've never run a penetration test."
+  },
+  {
+    "pillar": "reliability",
+    "question": "manage-service-limits",
+    "choices": ["rel_manage_service_limits_no"],
+    "notes": "I never looked at a single quota. Nothing hit one, but that's luck."
+  },
+  {
+    "pillar": "reliability",
+    "question": "planning-network-topology",
+    "choices": ["rel_planning_network_topology_ha_conn_users", "rel_planning_network_topology_ip_subnet_allocation"],
+    "notes": "The load balancer sits in two AZs and a /16 with /24 subnets leaves plenty of room. There's one VPC and nothing on premises, so the rest doesn't come up."
+  },
+  {
+    "pillar": "reliability",
+    "question": "service-architecture",
+    "applicable": false,
+    "notes": "It's one static page, there are no services to split up."
+  },
+  {
+    "pillar": "reliability",
+    "question": "prevent-interaction-failure",
+    "applicable": false,
+    "notes": "Nothing calls anything else apart from the load balancer calling the instances."
+  },
+  {
+    "pillar": "reliability",
+    "question": "mitigate-interaction-failure",
+    "choices": ["rel_mitigate_interaction_failure_stateless"],
+    "notes": "The instances keep no state, which is why any of them can be thrown away. No throttling or retries anywhere."
+  },
+  {
+    "pillar": "reliability",
+    "question": "monitor-aws-resources",
+    "choices": ["rel_monitor_aws_resources_monitor_resources", "rel_monitor_aws_resources_automate_response_monitor"],
+    "notes": "The metrics exist and the group acts on health checks by itself. No notifications go to me and no logs get analyzed."
+  },
+  {
+    "pillar": "reliability",
+    "question": "adapt-to-changes",
+    "choices": ["rel_adapt_to_changes_autoscale_adapt", "rel_adapt_to_changes_reactive_adapt_auto"],
+    "notes": "It replaces broken instances by itself, both tests in lab 07 showed that. But there's no scaling policy, so max 4 does nothing outside a rolling update. More traffic gets no extra instances. Never load tested either."
+  },
+  {
+    "pillar": "reliability",
+    "question": "tracking-change-management",
+    "choices": ["rel_tracking_change_management_planned_changemgmt", "rel_tracking_change_management_immutable_infrastructure", "rel_tracking_change_management_automated_changemgmt"],
+    "notes": "A new version means new instances, rolled out by the group. My tests were by hand, they aren't part of the deployment."
+  },
+  {
+    "pillar": "reliability",
+    "question": "backing-up-data",
+    "applicable": false,
+    "notes": "No data to back up, Terraform can rebuild all of it. This changes with the database lab."
+  },
+  {
+    "pillar": "reliability",
+    "question": "fault-isolation",
+    "choices": ["rel_fault_isolation_multiaz_region_system"],
+    "notes": "Instances and load balancer are in two AZs, but the one NAT gateway is in 1a. If 1a goes down the site should still answer from 1b, but the 1b instance loses the internet and Session Manager."
+  },
+  {
+    "pillar": "reliability",
+    "question": "withstand-component-failures",
+    "choices": ["rel_withstand_component_failures_monitoring_health", "rel_withstand_component_failures_failover2good", "rel_withstand_component_failures_auto_healing_system"],
+    "notes": "Health checks every 10 seconds, traffic moves to the healthy instance and the group replaces the broken one. Healing only covers the instances, it won't bring back the NAT gateway's AZ. Nobody gets notified and there's no uptime target."
+  },
+  {
+    "pillar": "reliability",
+    "question": "testing-resiliency",
+    "choices": ["rel_testing_resiliency_rca_resiliency", "rel_testing_resiliency_failure_injection_resiliency"],
+    "notes": "I broke it on purpose in lab 07, but only once and by hand. I wrote up the causes, though the 3.5 minute wait for the replacement is still unexplained. No load test yet, so I don't know what it can take."
+  },
+  {
+    "pillar": "reliability",
+    "question": "planning-for-recovery",
+    "choices": ["rel_planning_for_recovery_no"],
+    "notes": "No recovery time or data loss target. Terraform rebuilds it in a few minutes, but the region and AZs are hard coded, so it can't simply move if us-east-1 is down."
+  }
+]
