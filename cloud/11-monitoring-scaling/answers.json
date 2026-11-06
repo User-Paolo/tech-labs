@@ -1,0 +1,92 @@
+[
+  {
+    "pillar": "operationalExcellence",
+    "question": "observability",
+    "choices": ["ops_observability_identify_kpis", "ops_observability_application_telemetry"],
+    "notes": "Requests per instance, errors, response time and healthy instances are what I watch now, from the load balancer metrics and access logs. Nothing inside the app itself reports anything, and there's no tracing."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "workload-observability",
+    "choices": ["ops_workload_observability_create_alerts", "ops_workload_observability_analyze_workload_metrics", "ops_workload_observability_analyze_workload_logs", "ops_workload_observability_create_dashboards"],
+    "notes": "Alarms that email me, a dashboard, and I went through the access logs and flow logs in lab 11. The errors alarm missed a real failure by one error, so the alerts still need tuning."
+  },
+  {
+    "pillar": "operationalExcellence",
+    "question": "event-response",
+    "choices": ["ops_event_response_auto_event_response", "ops_event_response_dashboards"],
+    "notes": "The group replaces broken instances and adds new ones for load, and the dashboard shows it. There's still no process for what I do when an alert arrives."
+  },
+  {
+    "pillar": "security",
+    "question": "detect-investigate-events",
+    "choices": ["sec_detect_investigate_events_app_service_logging", "sec_detect_investigate_events_logs"],
+    "notes": "Load balancer access logs and VPC flow logs are on now and go to S3, and they showed the rejected scanning traffic. Nobody gets alerted about what's in them."
+  },
+  {
+    "pillar": "reliability",
+    "question": "manage-service-limits",
+    "choices": ["rel_manage_service_limits_aware_quotas_and_constraints", "rel_manage_service_limits_suff_buffer_limits"],
+    "notes": "I checked the main quotas in lab 11, 16 vCPUs against the 8 the group can use. That was one look, nothing monitors them."
+  },
+  {
+    "pillar": "reliability",
+    "question": "monitor-aws-resources",
+    "choices": ["rel_monitor_aws_resources_monitor_resources", "rel_monitor_aws_resources_notification_monitor", "rel_monitor_aws_resources_automate_response_monitor", "rel_monitor_aws_resources_storage_analytics"],
+    "notes": "Metrics, alarms with email, automatic responses and logs I actually read. The alarm email came about 3 minutes after the failure, after the group had already replaced the instance."
+  },
+  {
+    "pillar": "reliability",
+    "question": "adapt-to-changes",
+    "choices": ["rel_adapt_to_changes_autoscale_adapt", "rel_adapt_to_changes_reactive_adapt_auto", "rel_adapt_to_changes_proactive_adapt_auto", "rel_adapt_to_changes_load_tested_adapt"],
+    "notes": "There's a target tracking policy now. The load test took it from 2 to 4 instances and back down to 2 by itself."
+  },
+  {
+    "pillar": "reliability",
+    "question": "withstand-component-failures",
+    "choices": ["rel_withstand_component_failures_monitoring_health", "rel_withstand_component_failures_failover2good", "rel_withstand_component_failures_auto_healing_system", "rel_withstand_component_failures_notifications_sent_system"],
+    "notes": "Same as before plus the alarm email. Healing still only covers the instances and there's no uptime target."
+  },
+  {
+    "pillar": "reliability",
+    "question": "testing-resiliency",
+    "choices": ["rel_testing_resiliency_rca_resiliency", "rel_testing_resiliency_test_non_functional", "rel_testing_resiliency_failure_injection_resiliency"],
+    "notes": "Lab 11 added a load test. It was small, from my own PC over WiFi, so it shows that scaling works and not how much the setup can take."
+  },
+  {
+    "pillar": "performance",
+    "question": "compute-hardware",
+    "choices": ["perf_compute_hardware_collect_compute_related_metrics", "perf_compute_hardware_scale_compute_resources_dynamically"],
+    "notes": "It scales with load now. t3.micro is still only the cheap choice and I never looked at CPU."
+  },
+  {
+    "pillar": "performance",
+    "question": "process-culture",
+    "choices": ["perf_process_culture_use_monitoring_solutions", "perf_process_culture_load_test", "perf_process_culture_keep_workload_and_services_up_to_date"],
+    "notes": "A dashboard and a load test now, plus the latest Amazon Linux image on each apply. The target of 100 was picked so my test could trigger it, it didn't come from measuring."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "type-size-number-resources",
+    "choices": ["cost_type_size_number_resources_cost_modeling", "cost_type_size_number_resources_metrics"],
+    "notes": "The number of instances now follows a metric. The size still didn't come from usage data."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "manage-demand-resources",
+    "choices": ["cost_manage_demand_resources_dynamic"],
+    "notes": "The group adds instances for load and removes them after. I never analyzed real demand since there isn't any."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_user",
+    "choices": ["sus_sus_user_a2", "sus_sus_user_a4"],
+    "notes": "It scales with demand now, and everything still gets destroyed when the lab is done."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_hardware",
+    "choices": ["sus_sus_hardware_a2", "sus_sus_hardware_a4"],
+    "notes": "Two small instances most of the time, and 4 only under load. I still didn't compare t3 with the Graviton t4g instances."
+  }
+]

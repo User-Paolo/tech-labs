@@ -17,7 +17,7 @@ If you're working through the same material, feel free to look around and compar
 | [08 My own AWS bill](cloud/08-billing-and-costs/) | Cloud | Free plan credits, Cost Explorer, cost allocation tags, Budgets, Cost Anomaly Detection, pricing models | Done |
 | [09 Security services tour](cloud/09-security-services/) | Cloud | Trusted Advisor, IAM Access Analyzer, Artifact, GuardDuty, Inspector, Macie, Config, Security Hub | Done |
 | [10 Well-Architected review](cloud/10-well-architected/) | Cloud | Well-Architected Framework, the six pillars, Well-Architected Tool, risk review | Done |
-| [11 Monitoring and scaling](cloud/11-monitoring-scaling/) | Cloud | CloudWatch alarms and dashboards, SNS, target tracking scaling, load balancer access logs, VPC flow logs, Service Quotas | In progress |
+| [11 Monitoring and scaling](cloud/11-monitoring-scaling/) | Cloud | CloudWatch alarms and dashboards, SNS, target tracking scaling, load balancer access logs, VPC flow logs, Service Quotas | Done |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.

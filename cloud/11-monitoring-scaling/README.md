@@ -205,3 +205,90 @@ $ zcat $F | awk '$13=="REJECT" {print $7}' | sort | uniq -c | sort -rn | head -5
       6 0
 ```
 661 rejected records from 496 different addresses on 537 different ports. Nobody knows about this network and I only gave the URL to myself. My guess is that these are scanners going through public IP addresses, and they found the ones on the load balancer and the NAT gateway. The security groups stopped them, which is why they show up as `REJECT`. I knew this happens but I didn't expect to see it within half an hour. Lab 07 probably got the same and I had no way of seeing it.
+
+### 6. Load test, coming back down
+I stopped the heavy traffic at about 21:35 and went back to the loop at one request a second, so about 11 requests per instance per minute. I kept it running on purpose. With no traffic at all the `low` alarm sat at `INSUFFICIENT_DATA` at the start of the test, so I expected it wouldn't scale in on zero requests. I didn't test that part, I just kept the metric alive.
+```
+$ watch_scale
+21:53:18 desired/inservice 4/4 | high/low OK/OK | slow OK
+21:53:51 desired/inservice 3/3 | high/low OK/ALARM | slow OK
+21:54:55 desired/inservice 2/3 | high/low OK/ALARM | slow OK
+21:55:27 desired/inservice 2/2 | high/low OK/ALARM | slow OK
+$ aws autoscaling describe-scaling-activities --auto-scaling-group-name lab11-web --max-items 2 --query 'Activities[].Cause' --output text
+At 2026-11-06T21:54:53Z a monitor alarm TargetTracking-lab11-web-AlarmLow-e34c156b-e086-4673-b1fa-cdc4939661ea in state ALARM triggered policy lab11-requests-per-target changing the desired capacity from 3 to 2.
+At 2026-11-06T21:53:26Z a monitor alarm TargetTracking-lab11-web-AlarmLow-e34c156b-e086-4673-b1fa-cdc4939661ea in state ALARM triggered policy lab11-requests-per-target changing the desired capacity from 4 to 3.
+```
+About 18 minutes after the traffic stopped, which fits the 15 minutes in the alarm plus the metric delay. Going up took 5 minutes and one step, going down took 18 minutes and two steps. That makes sense to me, removing capacity too early hurts more than paying for it a bit longer. `low` stays in `ALARM` at 2 instances because the group can't go below its minimum.
+
+It removed `ip-10-0-11-138` and `ip-10-0-12-161`, the two older instances, and kept one in each AZ. And this answers something I couldn't confirm in lab 07, since I stopped that curl loop too early. The status codes for the whole lab:
+```
+$ zcat $A | awk '{print $9}' | sort | uniq -c
+  14478 200
+      7 460
+      7 502
+```
+Still the same 7 errors from step 3. Nothing failed while instances were added or removed. The `460`s went up from 1 to 7, those are curl giving up on the WiFi.
+
+### 7. The dashboard
+All of it on one page. The requests going up and back down, the group going from 2 to 4 and back to 2 a bit later, and the one unhealthy instance from step 3 at about 21:16.
+
+![CloudWatch dashboard during the lab](images/dashboard.png)
+
+### 8. Did the score from lab 10 move?
+[answers.json](answers.json) has the answers I changed. 14 got new ticks and `sus_hardware` only got a new note. I ran the script from lab 10 on them and saved a second milestone:
+```
+$ bash ~/tech-labs/cloud/10-well-architected/apply-answers.sh
+$ aws wellarchitected list-milestones --workload-id "$WL" --query 'MilestoneSummaries[].[MilestoneNumber,MilestoneName]' --output text
+2       after-lab11
+1       lab07-baseline
+```
+| Pillar | High | Medium | No risk | Not applicable |
+|---|---|---|---|---|
+| Operational Excellence | 8 → 7 | 2 → 3 | 0 | 1 |
+| Security | 9 → 8 | 1 → 2 | 0 | 1 |
+| Reliability | 8 | 2 → 1 | 0 → 1 | 3 |
+| Performance Efficiency | 3 | 1 | 0 | 1 |
+| Cost Optimization | 6 | 4 | 1 | 0 |
+| Sustainability | 0 | 4 | 0 | 2 |
+| **Total** | **34 → 32** | **14 → 15** | **1 → 2** | **8** |
+
+A whole lab and 14 answers with new ticks, and 3 ratings moved. `workload-observability` and `detect-investigate-events` went from High to Medium, and `adapt-to-changes` went from Medium to no risk. That last one was the biggest finding in lab 10 and it's the only one that's fully fixed now.
+
+Others didn't move at all. `monitor-aws-resources` is still High with 4 of 7 ticked, and so is `manage-service-limits` after I checked the quotas. Probably one look at the quotas just isn't what they mean by managing them. I didn't tick things I hadn't really done just to see the number drop, so I'm fine with 32.
+
+### 9. checkov in CI
+[lab11-terraform.yml](../../.github/workflows/lab11-terraform.yml) is the lab 07 workflow pointed at this folder.
+```
+Passed checks: 99, Failed checks: 0, Skipped checks: 13
+```
+Lab 07 had 9 skips, and the 2 for access logs and flow logs are gone since both are on now. The 6 new ones:
+
+| Check | What it wants | Why I skipped it |
+|---|---|---|
+| `CKV_AWS_26` | KMS encryption on the SNS topic | CloudWatch alarms can't publish to a topic using the AWS managed key |
+| `CKV_AWS_145` | KMS encryption on the logs bucket | S3 managed encryption is enough for logs from a short lab |
+| `CKV2_AWS_62` | Event notifications on the bucket | Nothing reacts to new log files |
+| `CKV_AWS_18` | Access logging on the bucket | It's the logs bucket |
+| `CKV_AWS_144` | Replication to another region | Not for logs from a short lab |
+| `CKV_AWS_21` | Versioning on the bucket | Logs never change and expire after 7 days |
+
+### 10. Destroy
+```
+$ terraform destroy
+Destroy complete! Resources: 43 destroyed.
+$ aws ec2 describe-vpcs --filters Name=tag:Lab,Values=11 --query 'Vpcs[].VpcId' --output text
+$ aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName' --output text
+$ aws s3api list-buckets --query "Buckets[?starts_with(Name,'lab11')].Name" --output text
+$ aws cloudwatch describe-alarms --query 'MetricAlarms[?contains(AlarmName,`lab11`) || contains(AlarmName,`TargetTracking`)].AlarmName' --output text
+$ aws sns list-topics --query 'length(Topics[?contains(TopicArn,`lab11`)])'
+0
+$ aws iam get-role --role-name lab11-ssm 2>&1 | tail -1
+aws: [ERROR]: An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name lab11-ssm cannot be found.
+```
+Nothing left, including the two alarms that target tracking made by itself. It was up for a bit over an hour. The review stays in the account since the tool is free.
+
+## What Broke and How I Fixed It
+
+**The plan count wasn't there.** I ran `terraform plan | tail -5` to skip the long output, and the last 5 lines were only Terraform's note about the `-out` option. The `Plan:` line is further up. `terraform plan -no-color | grep -E 'Plan:|Error'` shows just that line.
+
+**A pasted block got stuck on the end of an unfinished command.** A command was still sitting on the CloudShell prompt when I pasted the next block, so the two joined into `--output textBK=...` and failed. That meant `BK` never got set. The rest of the block kept running with an empty variable, `aws s3 sync` copied nothing and every `zcat` said `compressed data not read from a terminal`, because with no files to read it was waiting on the terminal. Pressing Enter for a clean prompt and setting `BK` first fixed it.
