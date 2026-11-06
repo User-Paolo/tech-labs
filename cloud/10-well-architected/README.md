@@ -79,6 +79,85 @@ A few things I hadn't noticed about my own lab until I went through the question
 - **Plain HTTP.** I knew this one already. No domain means no certificate.
 - **No plan after an alert.** Lab 02 sends me emails, but I have nothing written down for what I'd do next.
 
+### 5. The last three pillars
+Same routine. Performance has 5 questions, cost has 11 and sustainability has 6. Three more don't apply here because there's no data store and the software is one static page, so that makes 8 not applicable in total.
+
+Each pillar ended up asking about something different, which helps me more than the definitions did:
+
+| Pillar | What it asked me about |
+|---|---|
+| Operational Excellence | How I run it, ship changes and notice problems |
+| Security | Who can reach what, and how data is protected |
+| Reliability | Surviving failures and handling changes in demand |
+| Performance Efficiency | Picking the right resources and measuring them |
+| Cost Optimization | Knowing what I spend and removing what I don't use |
+| Sustainability | Using less hardware and energy |
+
+### 6. The full score
+```
+$ bash apply-answers.sh
+saved: priorities
+...
+saved: sus_dev
+```
+| Pillar | High | Medium | No risk | Not applicable |
+|---|---|---|---|---|
+| Operational Excellence | 8 | 2 | 0 | 1 |
+| Security | 9 | 1 | 0 | 1 |
+| Reliability | 8 | 2 | 0 | 3 |
+| Performance Efficiency | 3 | 1 | 0 | 1 |
+| Cost Optimization | 6 | 4 | 1 | 0 |
+| Sustainability | 0 | 4 | 0 | 2 |
+| **Total** | **34** | **14** | **1** | **8** |
+
+The Medium and no risk questions, the rest are High:
+```
+$ aws wellarchitected list-answers --workload-id "$WL" --lens-alias wellarchitected --pillar-id "$p" --max-results 50 --query "AnswerSummaries[?Risk=='MEDIUM' || Risk=='NONE'].[QuestionId,Risk]" --output text
+dev-integ       MEDIUM
+operations-health       MEDIUM
+network-protection      MEDIUM
+adapt-to-changes        MEDIUM
+withstand-component-failures    MEDIUM
+performing-architecture MEDIUM
+decomissioning-resources        MEDIUM
+type-size-number-resources      MEDIUM
+pricing-model   MEDIUM
+evaluate-new-services   MEDIUM
+evaluate-cost-effort    NONE
+sus_region      MEDIUM
+sus_user        MEDIUM
+sus_hardware    MEDIUM
+sus_dev MEDIUM
+```
+The one clean question is `evaluate-cost-effort`, which only has one choice to tick. Security did worst with 9 high out of 10.
+
+The rating doesn't seem to be a simple count of ticks. I ticked 5 of 9 on `cloud-financial-management` and it's High, while `operations-health` is Medium with nothing ticked. `sus_region` is the same, and sustainability has no High at all. I don't know the exact rule, my guess is that some best practices count for more than others and some questions can't go above Medium.
+
+Cost still got 6 high even after I spent all of lab 08 on my bill. Most of what's missing there is process, like policies and acting on real usage data.
+
+### 7. What I'd fix
+These are the gaps I think matter for lab 07, and where I plan to deal with them.
+
+| Gap | Fix | When |
+|---|---|---|
+| No scaling policy, never load tested | A target tracking policy and a load test | Lab 11 |
+| No alarms, dashboard or notifications | CloudWatch alarms and a dashboard, SNS for the emails | Lab 11 |
+| No load balancer access logs or VPC flow logs | Turn both on, as I said in the checkov skips in lab 07 | Lab 11 |
+| Never looked at a quota | Check the EC2 and load balancer ones in Service Quotas | Lab 11 |
+| No secrets or backups to manage yet | Secrets Manager and snapshots with a real database | Lab 12 |
+| My user has `AdministratorAccess`, default encryption keys only | Tighter policies and my own KMS key | Lab 14 |
+| No plan after an alert | Write one and test it with a fake leaked key | Lab 15 |
+| Plain HTTP | Needs a domain for an ACM certificate, no lab for this yet | Maybe the final project |
+| One NAT gateway | A second one in 1b, about $0.05 more an hour with its Elastic IP | Leaving it, a real system should have it but a lab doesn't need it |
+
+### 8. Saving the score
+A milestone freezes the review as it is right now, so I can compare against it after I fix things.
+```
+$ aws wellarchitected create-milestone --workload-id "$WL" --milestone-name lab07-baseline --query MilestoneNumber --output text
+1
+```
+The review stays in the account since the tool is free. After lab 11 I can update the answers and see whether the numbers actually move.
+
 ## What Broke and How I Fixed It
 
 **My export only had 51 questions.** I only noticed when the risk table added up to more than I'd answered. `list-answers` gave me 10 questions per pillar and stopped, so four pillars got cut off with no error. Setting `--max-results 50` got all of them.

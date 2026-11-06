@@ -208,5 +208,137 @@
     "question": "planning-for-recovery",
     "choices": ["rel_planning_for_recovery_no"],
     "notes": "No recovery time or data loss target. Terraform rebuilds it in a few minutes, but the region and AZs are hard coded, so it can't simply move if us-east-1 is down."
+  },
+  {
+    "pillar": "performance",
+    "question": "performing-architecture",
+    "choices": ["perf_architecture_understand_cloud_services_and_features", "perf_architecture_evaluate_trade_offs", "perf_architecture_factor_cost_into_architectural_decisions"],
+    "notes": "I studied these services for the exam and wrote down the tradeoffs, like skipping WAF because of the cost. I didn't benchmark anything."
+  },
+  {
+    "pillar": "performance",
+    "question": "compute-hardware",
+    "choices": ["perf_compute_hardware_collect_compute_related_metrics"],
+    "notes": "Detailed monitoring collects the metrics but nothing uses them. t3.micro was the cheap choice and I never checked if it fits. There's no scaling policy."
+  },
+  {
+    "pillar": "performance",
+    "question": "data-management",
+    "applicable": false,
+    "notes": "There's no data store."
+  },
+  {
+    "pillar": "performance",
+    "question": "networking",
+    "choices": ["perf_networking_load_balancing_distribute_traffic"],
+    "notes": "The load balancer spreads traffic over two AZs. I use us-east-1 out of habit and never compared regions."
+  },
+  {
+    "pillar": "performance",
+    "question": "process-culture",
+    "choices": ["perf_process_culture_keep_workload_and_services_up_to_date"],
+    "notes": "Each apply picks up the latest Amazon Linux image. No KPIs and no load test yet, lab 11 covers those."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "cloud-financial-management",
+    "choices": ["cost_cloud_financial_management_function", "cost_cloud_financial_management_budget_forecast", "cost_cloud_financial_management_cost_awareness", "cost_cloud_financial_management_proactive_process", "cost_cloud_financial_management_usage_report"],
+    "notes": "It's my credits so I own this. I have a $5 budget that ignores credits, an anomaly monitor and a cost line in every lab, and I went through the real bill in lab 08."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "govern-usage",
+    "choices": ["cost_govern_usage_goal_target", "cost_govern_usage_track_lifecycle"],
+    "notes": "Each lab has a cost target and the main README tracks its status. Budgets only warn me, nothing stops the spending."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "monitor-usage",
+    "choices": ["cost_monitor_usage_define_attribution", "cost_monitor_usage_config_tools", "cost_monitor_usage_org_information"],
+    "notes": "Everything has a Lab tag and Cost Explorer and Budgets are set up. The $0.20 from lab 07 still sits under No tag key because I activated the tag a day later."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "decomissioning-resources",
+    "choices": ["cost_decomissioning_resources_track", "cost_decomissioning_resources_implement_process", "cost_decomissioning_resources_decommission"],
+    "notes": "terraform destroy takes it all down and I check that nothing is left. I run it by hand, so it would keep billing if I forgot."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "select-service",
+    "choices": ["cost_select_service_analyze_all", "cost_select_service_select_for_cost", "cost_select_service_licensing"],
+    "notes": "I listed the hourly price of each part in the lab 07 README. One NAT gateway saves money and is also the weak spot in the reliability pillar."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "type-size-number-resources",
+    "choices": ["cost_type_size_number_resources_cost_modeling"],
+    "notes": "I priced it in the Pricing Calculator in lab 08. The size and the count didn't come from real usage data."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "pricing-model",
+    "choices": ["cost_pricing_model_analysis", "cost_pricing_model_implement_models"],
+    "notes": "Lab 08 compared On Demand, Reserved Instances, Savings Plans and Spot for t3.micro. On Demand fits something that runs for about an hour."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "data-transfer",
+    "choices": ["cost_data_transfer_no"],
+    "notes": "I never looked at this. The NAT gateway also charges per GB, but there's hardly any traffic here."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "manage-demand-resources",
+    "choices": ["cost_manage_demand_resources_no"],
+    "notes": "The group stays at 2 instances whatever the traffic does. Lab 11 changes that."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "evaluate-new-services",
+    "choices": ["cost_evaluate_new_services_review_process"],
+    "notes": "This lab is the first review. One review isn't regular yet, so I left the second choice unticked."
+  },
+  {
+    "pillar": "costOptimization",
+    "question": "evaluate-cost-effort",
+    "choices": ["cost_evaluate_cost_effort_automations_operations"],
+    "notes": "Terraform and the group do the building and replacing, so it takes very little of my time."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_region",
+    "choices": ["sus_sus_region_no"],
+    "notes": "I use us-east-1 out of habit and never looked at this."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_user",
+    "choices": ["sus_sus_user_a4"],
+    "notes": "Everything gets destroyed when the lab is done. It doesn't scale with demand though."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_software",
+    "applicable": false,
+    "notes": "It's one static page, there's nothing to optimize."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_data",
+    "applicable": false,
+    "notes": "There's no data."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_hardware",
+    "choices": ["sus_sus_hardware_a2", "sus_sus_hardware_a4"],
+    "notes": "Two small instances, with a managed load balancer and NAT gateway. I didn't compare t3 with the Graviton t4g instances."
+  },
+  {
+    "pillar": "sustainability",
+    "question": "sus_dev",
+    "choices": ["sus_sus_dev_a3"],
+    "notes": "Each apply uses the latest Amazon Linux image. I don't have any sustainability goals to speak of."
   }
 ]
