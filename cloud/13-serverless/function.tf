@@ -66,7 +66,7 @@ data "archive_file" "app" {
 
 resource "aws_lambda_function" "web" {
   #checkov:skip=CKV_AWS_50:CloudWatch logs are enough for one small function
-  #checkov:skip=CKV_AWS_115:The account only allows 10 at once and Lambda keeps those unreserved
+  #checkov:skip=CKV_AWS_115:The account only allows 10 at once, I'm testing that limit here
   #checkov:skip=CKV_AWS_116:API Gateway calls it and waits, so a failure goes back to the caller
   #checkov:skip=CKV_AWS_117:It only talks to AWS APIs, a VPC would mean paying for a NAT gateway
   #checkov:skip=CKV_AWS_173:The variables only hold a table name and a version

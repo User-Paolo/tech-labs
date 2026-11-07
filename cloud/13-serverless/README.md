@@ -131,3 +131,92 @@ requests 5940 p50 0.043572 p95 0.062882 p99 0.083295 max 0.355754
 5940 out of 5940. It came to about 30 requests a second against about 29 in the burst test, so the rate was close and the difference is how the requests arrive. The median was also back to 0.044 seconds.
 
 So this account can take that average rate, and a sudden burst is what hurts it. I don't know how bursty my traffic was in lab 11, so I can't say lab 07 would have handled this exact pattern better. The normal default of 1000 wouldn't have had this problem at all, so this comes from my account's limit of 10.
+
+### 7. A slow function, and a broken one
+Bursts aren't the only way to reach the limit. `/slow` takes a second per request, so at about 30 requests a second it needs about 30 copies, even when they're spread out:
+```
+$ bash ~/even.sh 33 60 slow > /tmp/slow.log
+$ bash ~/sum.sh /tmp/slow.log
+    619 200
+   1361 503
+requests 1980 p50 0.024497 p95 1.054129 p99 1.063527 max 1.996273
+```
+Only 31% got through. It ran for 66 seconds, so that's about 9.4 a second, which fits 10 copies that each take a second. The median of 0.024 seconds looks great, but that's just how quickly the rejected ones came back. So duration matters as much as traffic here, and it's easy to miss in the average numbers.
+
+For the code crashing, I called `/boom`. The caller gets a generic message, and the real error only goes to the logs:
+```
+$ curl -s -i "${URL}boom" | sed -n '1p;$p'
+HTTP/2 500
+{"message":"Internal Server Error"}
+```
+```
+[ERROR] RuntimeError: broken on purpose
+Traceback (most recent call last):
+  File "/var/task/app.py", line 17, in handler
+    raise RuntimeError("broken on purpose")
+```
+
+### 8. Deploying with traffic running
+In lab 07 a new version took a rolling update that replaced the instances over several minutes. Here I changed `page_version` to `v2` while another tab sent about 3 requests a second:
+```
+$ awk '{print $3, $NF}' /tmp/deploy.log | uniq -c
+    216 "cold5", 200
+    178 "v2", 200
+$ grep -c '"cold": true' /tmp/deploy.log
+1
+```
+216 requests on the old version, then 178 on the new one, all `200`. They didn't mix back and forth, and it took 1 cold start. I wouldn't call that proof for a busy function, but at this traffic the deploy was invisible.
+
+The counter was a nice check on all of this. Adding up every `200` before the deploy test finished gives 25 + 9010 + 5940 + 619 + 216 = 15810, and the first `v2` response said `"visits": 15811`. So every request that returned `200` was counted once.
+
+### 9. What it would cost
+I measured what one request uses instead of guessing. Over the whole lab there were 15964 invocations, 15963 DynamoDB write units and about 500 bytes of logs per request. The logs were the part I had left out of my estimate.
+
+| Per million requests | |
+|---|---|
+| API Gateway | $1.00 |
+| DynamoDB, 1 write unit per request | $0.625 |
+| CloudWatch logs, about 0.5 GB at $0.50 per GB | $0.25 |
+| Lambda requests | $0.20 |
+| Lambda compute, 128 MB at 29 ms | $0.05 |
+| **Total** | **About $2.12** |
+
+In [lab 08](../08-billing-and-costs/) the Pricing Calculator put the lab 07 setup at $69.43 a month, whatever the traffic. So this is the comparison, if the traffic stayed steady for the whole month:
+
+| Traffic | Serverless | Lab 07 setup |
+|---|---|---|
+| Nothing | About $0 | $69.43 |
+| 1000 visits a day | About $0.06 | $69.43 |
+| About 750 requests a minute | About $69 | $69.43 |
+| 2000 requests a minute | About $186 | $69.43, plus the extra instances and load balancer usage, which I didn't price |
+
+I expected serverless to be cheaper, and it's only cheaper up to about 750 requests a minute. Above that, the servers I pay for by the hour start to look better. This leaves out any free tier, and a plain static page wouldn't need the DynamoDB write. All the requests in this lab should come to about 4 cents.
+
+So back to the question. Yes, the page runs fine with no servers, it costs nothing while idle and deploys cleanly. What I give up:
+
+- The first request after a quiet period or a deploy takes about a second, about 10 times longer than normal.
+- I can't limit the URL to my IP the way I did in lab 07 without adding other services.
+- Requests over the concurrency limit are refused and don't wait, which matters a lot on an account limited to 10.
+- It gets expensive under steady heavy traffic.
+
+### 10. Cleaning up
+```
+Destroy complete! Resources: 11 destroyed.
+```
+```
+functions: 0
+apis: 0
+tables: 0
+log groups: 0
+roles: 0
+old url: 000
+```
+The limit of 10 is one I need to remember for the final project. Anything built on Lambda in this account has to stay under it, or I'd have to request an increase.
+
+## What Broke and How I Fixed It
+
+**The first apply stopped at the stage.** API Gateway requires a request ID in the access log format, and mine didn't have one. Adding `$context.requestId` fixed it, and Terraform only had to create what was missing.
+
+**9% of the requests failed in a test I expected to pass.** The average rate was far below the limit, so at first the `503`s made no sense. The access logs, `Throttles` and `ConcurrentExecutions` all pointed at the limit of 10, and spreading out the same rate in step 6 confirmed that my bursts were the cause.
+
+**The load test timings were misleading.** The median of 0.43 seconds in step 5 looked like the function being slow, but API Gateway measured 28 ms. Most of that time seems to be CloudShell starting 33 `curl`s at once, so I now compare the client side timings with the server side ones.
