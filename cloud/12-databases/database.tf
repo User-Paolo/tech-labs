@@ -31,26 +31,13 @@ resource "aws_db_instance" "main" {
   publicly_accessible    = false
   multi_az               = var.multi_az
 
-  backup_retention_period = 7
+  # The Free plan refuses 7 days and accepts 1
+  backup_retention_period = 1
   copy_tags_to_snapshot   = true
   skip_final_snapshot     = true
   apply_immediately       = true
 
   auto_minor_version_upgrade = true
-}
-
-resource "aws_db_instance" "replica" {
-  count = var.read_replica ? 1 : 0
-
-  identifier          = "lab12-db-replica"
-  replicate_source_db = aws_db_instance.main.identifier
-  instance_class      = "db.t4g.micro"
-
-  vpc_security_group_ids = [aws_security_group.db.id]
-  publicly_accessible    = false
-  copy_tags_to_snapshot  = true
-  skip_final_snapshot    = true
-  apply_immediately      = true
 }
 
 resource "aws_dynamodb_table" "notes" {

@@ -3,9 +3,3 @@ variable "multi_az" {
   type        = bool
   default     = false
 }
-
-variable "read_replica" {
-  description = "Adds a read replica next to the main database"
-  type        = bool
-  default     = false
-}
