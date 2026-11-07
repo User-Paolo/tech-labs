@@ -172,3 +172,152 @@ The loop reads the password once when it starts and keeps it, like an app that n
 I expected that part. An app that holds on to the password stops working at the rotation, and with the default schedule that happens every week.
 
 What I didn't expect was that a fresh login failed too. When I stopped the loop I tried one that read the password from Secrets Manager first, and got `password authentication failed`. Trying again at 15:06:31 worked. The secret's `LastRotatedDate` is 15:05:20, exactly a minute after the loop's first failure. It looks like the database had the new password for about a minute while the secret was still handing out the old one, so reading the secret again isn't enough on its own. An app would also need to retry when a login fails.
+
+### 9. Getting deleted rows back
+I made a small `customers` table and tried both kinds of backup against the same accident:
+
+| Time | What I did |
+|---|---|
+| | Added `anna` and `ben` |
+| 18:47 to 18:52 | Took a snapshot, about 5 minutes |
+| | Added `cara` |
+| 18:56:09 | Saved the time as my restore point |
+| | Ran `delete from customers`, 3 rows gone |
+
+Point in time recovery can't restore to a moment until the transaction logs have caught up, so I waited until `LatestRestorableTime` passed 18:56:09, which took under 3 minutes. Then I started both restores, and the second one was refused:
+```
+An error occurred (InstanceQuotaExceeded) when calling the RestoreDBInstanceToPointInTime operation:
+You reached the maximum number of instances available with free plan accounts.
+```
+The main database and the restore from the snapshot were already there, so the limit looks like 2 database instances. The error doesn't give a number. I checked the first copy, deleted it and then ran the second restore.
+
+```
+$ db -h "$R" -c "select * from customers"       # restored from the snapshot
+ anna | before the snapshot
+ ben  | before the snapshot
+
+$ db -h "$R" -c "select * from customers"       # restored to 18:56:09
+ anna | before the snapshot
+ ben  | before the snapshot
+ cara | after the snapshot
+```
+
+| Restore | Got back | Time until available |
+|---|---|---|
+| Snapshot | Everything up to the snapshot | About 7 minutes |
+| Point in time | Everything up to my restore point | About 12 minutes |
+
+The original database still had 0 rows after both, because a restore always creates a new database with a new address. So getting the data back is only part of it, the app would also have to be pointed at the new address. Both copies accepted the current password. I only ran each restore once on a very small database, so I wouldn't read much into the difference in time.
+
+### 10. DynamoDB
+Same data, very different setup. There's no instance size, subnet or AZ for me to pick, and no password. The test instance gets in with its IAM role:
+```
+$ aws dynamodb put-item --table-name "$TABLE" --item '{"id":{"S":"anna"},"note":{"S":"first item"}}'
+$ aws dynamodb put-item --table-name "$TABLE" --item '{"id":{"S":"ben"},"note":{"S":"extra fields"},"city":{"S":"Oslo"},"orders":{"N":"3"}}'
+$ aws dynamodb scan --table-name "$TABLE" --query 'Items[].{id:id.S,note:note.S,city:city.S,orders:orders.N}' --output table
+| city | id   | note         | orders |
+| Oslo | ben  | extra fields | 3      |
+| None | anna | first item   | None   |
+```
+`ben` has two fields that `anna` doesn't, and I didn't have to change the table for that. PostgreSQL won't do the same without changing the table first:
+```
+$ db -c "insert into customers (name, city) values ('dan', 'Oslo')"
+ERROR:  column "city" of relation "customers" does not exist
+```
+The role is limited to this one table, so listing tables is denied:
+```
+$ aws dynamodb list-tables 2>&1 | grep -o AccessDeniedException
+AccessDeniedException
+```
+The other side of this is that the role only allows `GetItem`, `PutItem` and `Scan`, and a scan reads the whole table. Looking things up by anything other than the key takes more planning here than a `where` clause does in PostgreSQL.
+
+Point in time recovery is turned on for the table in [database.tf](database.tf), but I didn't test a restore. I also can't test a failover here, since AWS doesn't give me anything to fail over.
+
+### 11. Back to the read replica
+I left this for last because the managed password had to go first, and that deletes its secret. I turned it off and kept the same password, so the loop never noticed:
+```
+$ aws rds modify-db-instance --db-instance-identifier lab12-db --no-manage-master-user-password --master-user-password "$PW" --apply-immediately
+```
+This time RDS accepted the replica, so the error in step 7 really was about the password. It took about 8.5 minutes to build, and the loop had 0 failed writes the whole time. It also landed in `us-east-1b`, the same AZ as the main database, so this replica wouldn't have helped if that AZ went down.
+
+Then the three things I wanted to see:
+```
+$ psql -h "$R" -Atc "select 'read only copy: ' || pg_is_in_recovery()"
+read only copy: true
+$ psql -h "$R" -c "insert into customers values ('eve', 'written to the replica')"
+ERROR:  cannot execute INSERT in a read-only transaction
+$ for i in 1 2 3 4 5; do psql -h "$R" -Atc "select 'lag ' || (now() - pg_last_xact_replay_timestamp())"; sleep 2; done
+lag 00:00:00.21988
+lag 00:00:00.17604
+lag 00:00:00.128627
+lag 00:00:00.082246
+lag 00:00:00.040244
+```
+So it follows the main database closely, at least with one small write a second.
+
+Promoting it took about 5 minutes and turned it into its own database:
+```
+read only copy: false
+INSERT 0 1
+promoted copy has 1 customers
+main database has 0 customers
+promoted heartbeat 2125
+main heartbeat 2496
+```
+`eve` only exists on the promoted copy, and the heartbeat count on the copy stopped at the moment they split. The main database kept writing with 0 failures.
+
+This is the comparison I wanted from the start:
+
+| | Multi AZ standby | Read replica |
+|---|---|---|
+| Can I read from it? | No, the AWS docs say a standby can't serve reads | Yes |
+| Can I write to it? | No | Not until it's promoted |
+| Address | The same endpoint moves to it | Its own address |
+| Taking over | Failover, 14 seconds in my test | I promote it, about 5 minutes, then point the app at it |
+| Keeping up | Synchronous, according to the AWS docs | 0.04 to 0.22 seconds behind in my test |
+| Works with the RDS managed password? | Yes | Not when creating the replica |
+
+I turned the managed password back on afterwards, and that took under a minute.
+
+### 12. Cleaning up
+The replica and the snapshot were made with the CLI, so I deleted those first and then ran the destroy:
+```
+Destroy complete! Resources: 28 destroyed.
+```
+```
+rds: 0
+snapshots: 0
+auto backups: 0
+subnet groups: 0
+dynamodb: 0
+secrets: 0
+nat: 0
+elastic ips: 0
+instances: 0
+vpcs: 0
+role: 0
+```
+The secret went away with the database, so there was nothing left to clean up in Secrets Manager.
+
+I'm not updating the review from [lab 10](../10-well-architected/) this time. It scores lab 07, which still has no data store, and this lab was a separate setup. So the backup and secrets questions there stay as they were, but I've now done both on a real database.
+
+The Free plan limits from this lab are ones I need to remember for the final project:
+
+| Limit | What I saw |
+|---|---|
+| RDS backups | 7 days refused, 1 day accepted, 2 to 6 not tried |
+| RDS instances | A third one refused while 2 existed |
+| Multi AZ | Allowed |
+| Read replicas | Allowed |
+
+## What Broke and How I Fixed It
+
+**The first apply stopped halfway.** `FreeTierRestrictionError` on the 7 days of backups, after the network had already been created. The NAT gateway was already billing, so I lowered it to 1 and applied again. Terraform only made what was missing.
+
+**The read replica was refused.** Creating one isn't supported while RDS manages the password on the source database. I took it out of the Terraform code, ran the other tests first, and then made the replica with the CLI after turning the managed password off.
+
+**The second restore was refused.** `InstanceQuotaExceeded`, because of the instance limit on the Free plan. I ran the restores one at a time instead of side by side.
+
+**A fresh login failed after the rotation.** I thought the rotated password was broken, but the rotation just hadn't finished. It worked a minute later, and that became part of step 8.
+
+**`terraform output` failed after a break.** CloudShell had restarted and `/tmp` was wiped, and my `TF_DATA_DIR` is in `/tmp`, so I got `Required plugins are not installed`. The state file is in my home folder and survived, so running `terraform init` again fixed it. In another tab `start-session` failed with `Invalid length for parameter Target`, because I wasn't in the Terraform folder and `terraform output` came back empty.
