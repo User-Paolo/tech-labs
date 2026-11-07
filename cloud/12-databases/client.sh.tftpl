@@ -1,0 +1,40 @@
+#!/bin/bash
+dnf install -y postgresql17 jq
+
+cat > /etc/profile.d/lab12.sh <<'EOF'
+export AWS_DEFAULT_REGION=us-east-1
+export PGHOST=${db_host}
+export PGDATABASE=${db_name}
+export PGUSER=${db_user}
+export PGSSLMODE=require
+export PGCONNECT_TIMEOUT=2
+export SECRET_ARN=${secret_arn}
+export TABLE=${table}
+
+db_password() {
+  aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretString --output text | jq -r .password
+}
+
+db() {
+  PGPASSWORD=$(db_password) psql "$@"
+}
+EOF
+
+# One new connection and one insert a second, shows the address behind the endpoint
+cat > /usr/local/bin/write-loop <<'EOF'
+#!/bin/bash
+source /etc/profile.d/lab12.sh
+export PGPASSWORD=$(db_password)
+psql -qc 'create table if not exists heartbeat (id bigserial primary key, sent_at timestamptz not null default now())'
+while true; do
+  now=$(date -u +%H:%M:%S)
+  addr=$(getent hosts "$PGHOST" | awk '{print $1}')
+  if result=$(timeout 3 psql -Atqc 'insert into heartbeat default values returning id' 2>&1); then
+    echo "$now ok id=$result $addr"
+  else
+    echo "$now FAIL $addr $(tail -1 <<<"$result" | cut -c1-60)"
+  fi
+  sleep 1
+done
+EOF
+chmod +x /usr/local/bin/write-loop
