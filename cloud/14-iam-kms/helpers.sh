@@ -18,3 +18,17 @@ t() {
   c=$(aws sts assume-role --role-arn "$ROLE" --role-session-name tester --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text) || return 1
   AWS_ACCESS_KEY_ID=$(cut -f1 <<<"$c") AWS_SECRET_ACCESS_KEY=$(cut -f2 <<<"$c") AWS_SESSION_TOKEN=$(cut -f3 <<<"$c") aws "$@" 2>&1 | sed -E 's/[0-9]{12}/123456789012/g'
 }
+
+# Reads one file as the tester, prints its encryption and content
+g() {
+  rm -f /tmp/g.out
+  t s3api get-object --bucket "$B" --key "$1" /tmp/g.out --query ServerSideEncryption --output text
+  [ -s /tmp/g.out ] && echo "content: $(cat /tmp/g.out)"
+}
+
+# The same read as me
+a() {
+  rm -f /tmp/a.out
+  aws s3api get-object --bucket "$B" --key "$1" /tmp/a.out --query ServerSideEncryption --output text 2>&1 | sed -E 's/[0-9]{12}/123456789012/g'
+  [ -s /tmp/a.out ] && echo "content: $(cat /tmp/a.out)"
+}
