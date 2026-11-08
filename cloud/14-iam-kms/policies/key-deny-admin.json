@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AccountCanManageTheKey",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::ACCOUNT:root" },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AdminCannotDecrypt",
+      "Effect": "Deny",
+      "Principal": { "AWS": "ADMIN_ARN" },
+      "Action": "kms:Decrypt",
+      "Resource": "*"
+    }
+  ]
+}
