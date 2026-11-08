@@ -20,7 +20,7 @@ If you're working through the same material, feel free to look around and compar
 | [11 Monitoring and scaling](cloud/11-monitoring-scaling/) | Cloud | CloudWatch alarms and dashboards, SNS, target tracking scaling, load balancer access logs, VPC flow logs, Service Quotas | Done |
 | [12 Databases](cloud/12-databases/) | Cloud | RDS, Multi AZ, read replicas, snapshots, DynamoDB, Secrets Manager | Done |
 | [13 Serverless](cloud/13-serverless/) | Cloud | Lambda, API Gateway, DynamoDB, cold starts, Lambda concurrency, cost per request | Done |
-| [14 IAM policy logic and KMS](cloud/14-iam-kms/) | Cloud | IAM policy evaluation, explicit deny, permissions boundaries, resource based policies, KMS key policies | In progress |
+| [14 IAM policy logic and KMS](cloud/14-iam-kms/) | Cloud | IAM policy evaluation, explicit deny, permissions boundaries, resource based policies, KMS key policies | Done |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.

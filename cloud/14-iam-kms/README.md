@@ -122,3 +122,105 @@ AES256
 content: hello
 ```
 It worked, like the docs say. That's an odd gap. A boundary is meant to be the most a role can do, and a bucket policy in the same account can still go around it, depending on which ARN it names. If I relied on boundaries to limit someone, I'd also have to watch the bucket policies.
+
+### 7. My own key policy against me
+Everything so far was about the test role. My user has `AdministratorAccess`, so no IAM policy in the account can stop me unless I put it there. A key policy is different, because it sits on the key itself. With the role back on `s3-read` and [kms-decrypt.json](policies/kms-decrypt.json), both of us could read the KMS file. Then I replaced the key policy with [key-deny-admin.json](policies/key-deny-admin.json), which keeps the normal statement for the account and adds a deny on `kms:Decrypt` for my user only:
+```
+$ aws kms put-key-policy --key-id "$KEY" --policy-name default --policy "$(render policies/key-deny-admin.json)"
+$ a kms/notes.txt
+... User: arn:aws:iam::123456789012:user/Paolo-Admin is not authorized to perform: kms:Decrypt on resource: arn:aws:kms:us-east-1:123456789012:key/<key-id> with an explicit deny in a resource-based policy
+$ a plain/hello.txt
+AES256
+content: hello
+```
+The admin lost the KMS file and kept the plain one, since that one never touches my key. Writing was a surprise:
+```
+$ echo "written by admin" > /tmp/new.txt
+$ aws s3 cp /tmp/new.txt "s3://$B/kms/admin.txt" --quiet && echo uploaded
+uploaded
+$ a kms/admin.txt
+... is not authorized to perform: kms:Decrypt ... with an explicit deny in a resource-based policy
+$ g kms/admin.txt
+aws:kms
+content: written by admin
+```
+An upload uses `kms:GenerateDataKey`, and only `kms:Decrypt` was denied. So I could write a file that I couldn't read back, while the test role could read it fine.
+
+The deny only lasts as long as I leave it there, though. The first statement still gives the account `kms:*`, and that includes changing the key policy. So I took the deny out again:
+```
+$ aws kms put-key-policy --key-id "$KEY" --policy-name default --policy "$(render policies/key-deny-admin.json | jq 'del(.Statement[1])')"
+$ aws kms get-key-policy --key-id "$KEY" --policy-name default --query Policy --output text | jq -r '.Statement[].Sid'
+AccountCanManageTheKey
+$ a kms/notes.txt
+aws:kms
+content: kms notes
+```
+That answers the question from the start. A key policy can block an admin, even one with `AdministratorAccess`. But an admin who can still edit the key policy can just remove the block. To really keep someone out, the key policy would also have to take away `kms:PutKeyPolicy`, and if I got that wrong I could lock the whole account out of its own key. I didn't try that part. `terraform plan` said `No changes` afterwards, so the policy I put back matched the code.
+
+### 8. Turning the key off
+Next I disabled the key. No permissions changed this time:
+```
+$ aws kms disable-key --key-id "$KEY"
+$ g kms/notes.txt
+An error occurred (KMS.DisabledException) when calling the GetObject operation: arn:aws:kms:us-east-1:123456789012:key/<key-id> is disabled.
+$ a kms/notes.txt
+An error occurred (KMS.DisabledException) when calling the GetObject operation: arn:aws:kms:us-east-1:123456789012:key/<key-id> is disabled.
+$ a plain/hello.txt
+AES256
+content: hello
+```
+A different error from all the others, since nobody was denied. The key just stopped working for everyone, me included, and new uploads with it failed too. After `enable-key` the tester read the file again straight away. So disabling a key is a quick way to make all the data under it unreadable without touching a single policy, and it's easy to undo.
+
+### 9. What CloudTrail saw
+With Bucket Keys off, every read and write of a KMS file should be its own KMS call. I pulled the `Decrypt` and `GenerateDataKey` events for the last 40 minutes:
+```
+2026-11-08T18:39:43Z  GenerateDataKey  arn:aws:iam::123456789012:user/Paolo-Admin                 ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T18:41:06Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         AccessDenied       -
+2026-11-08T18:51:29Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T18:51:30Z  Decrypt  arn:aws:iam::123456789012:user/Paolo-Admin                         ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T18:57:23Z  Decrypt  arn:aws:iam::123456789012:user/Paolo-Admin                         AccessDenied       -
+2026-11-08T18:57:25Z  GenerateDataKey  arn:aws:iam::123456789012:user/Paolo-Admin                 ok                 arn:aws:s3:::<bucket>/kms/admin.txt
+2026-11-08T18:57:26Z  Decrypt  arn:aws:iam::123456789012:user/Paolo-Admin                         AccessDenied       -
+2026-11-08T18:57:27Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T18:57:29Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         ok                 arn:aws:s3:::<bucket>/kms/admin.txt
+2026-11-08T18:58:26Z  Decrypt  arn:aws:iam::123456789012:user/Paolo-Admin                         ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T19:00:31Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         DisabledException  arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T19:00:32Z  Decrypt  arn:aws:iam::123456789012:user/Paolo-Admin                         DisabledException  arn:aws:s3:::<bucket>/kms/notes.txt
+2026-11-08T19:00:33Z  GenerateDataKey  arn:aws:iam::123456789012:user/Paolo-Admin                 DisabledException  arn:aws:s3:::<bucket>/kms/admin2.txt
+2026-11-08T19:00:57Z  Decrypt  arn:aws:sts::123456789012:assumed-role/lab14-tester/tester         ok                 arn:aws:s3:::<bucket>/kms/notes.txt
+```
+Every KMS step of the lab is in there, from step 4 to step 8, with who asked and which file. The calls were made by S3, but they're logged under the person who asked S3. One of the denied events in full shows how:
+```
+"eventSource": "kms.amazonaws.com",
+"errorCode": "AccessDenied",
+"invokedBy": "fas.s3.amazonaws.com",
+"requestParameters": null
+```
+`fas` stands for forward access sessions, which is how S3 calls KMS with my identity instead of its own. The denied events have no `requestParameters`, so they don't say which file was asked for. The file name only shows up when the call goes through.
+
+### 10. Cleaning up
+I removed the two policies I had added by hand, then destroyed the rest:
+```
+Destroy complete! Resources: 7 destroyed.
+```
+```
+$ aws kms describe-key --key-id "$KEY" --query 'KeyMetadata.[KeyState,DeletionDate]' --output text
+PendingDeletion 2026-11-15T19:07:18.540000+00:00
+$ aws kms encrypt --key-id "$KEY" --plaintext aGk= --query KeyId --output text
+An error occurred (KMSInvalidStateException) when calling the Encrypt operation: arn:aws:kms:us-east-1:123456789012:key/<key-id> is pending deletion.
+```
+```
+my own aliases: 0
+role: NoSuchEntity
+boundary policies: 0
+bucket: 404 Not Found
+```
+The key can't be used while it waits, and the [KMS pricing page](https://aws.amazon.com/kms/pricing/) says a key scheduled for deletion isn't billed. The key only existed for about half an hour of its $1 a month and the lab made well under 100 KMS requests, so my estimate is under a cent.
+
+## What Broke and How I Fixed It
+
+**Reads as the test role only said `Forbidden`.** `s3 cp` calls `HeadObject` first, and that call returns a bare `403` with no reason. Switching to `s3api get-object` gave the full message with the policy type that denied it, so the `g` and `a` functions use that.
+
+**An upload printed nothing at all.** With the key disabled, my upload showed neither `uploaded` nor an error. `--quiet` in `s3 cp` hides errors as well. Listing the folder showed the file was never written, and CloudTrail had the `GenerateDataKey` call with `DisabledException`.
+
+**I couldn't look up a KMS denial in more detail.** The KMS errors end with an authorization ID that's meant to be looked up with `get-request-authorization-details`. The CLI in CloudShell doesn't have that command yet and answered `Found invalid choice`. The error message and CloudTrail were enough for this lab, so I left it.
