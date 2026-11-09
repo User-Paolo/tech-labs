@@ -20,3 +20,11 @@ steal_session() {
 xs() {
   AWS_ACCESS_KEY_ID="$SAK" AWS_SECRET_ACCESS_KEY="$SSK" AWS_SESSION_TOKEN="$STOK" aws "$@" 2>&1 | sed -E 's/[0-9]{12}/123456789012/g'
 }
+
+# Lists CloudTrail events since $SINCE in the regions the drill touched
+trail() {
+  for r in us-east-1 eu-west-1 ap-southeast-1; do
+    aws cloudtrail lookup-events --region "$r" --lookup-attributes AttributeKey="$1",AttributeValue="$2" --start-time "$SINCE" --output json |
+      jq -r --arg r "$r" '.Events[].CloudTrailEvent | fromjson | [.eventTime, $r, .eventName, (.errorCode // "ok"), ((.userIdentity.accessKeyId // "-") | .[0:4] + "..."), .sourceIPAddress] | @tsv'
+  done | sort
+}
