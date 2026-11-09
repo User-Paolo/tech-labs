@@ -142,3 +142,91 @@ $ trail AccessKeyId "$SAK"
 2026-11-09T18:54:05Z  us-east-1  GetCallerIdentity  ok  ASIA...  203.0.113.10
 ```
 The last four characters of that key matched the session in my shell. So the `GetSessionToken` event is the link between the two keys, and searching only for the leaked key would miss anything done with the session. Searching by user name with `trail Username lab15-leaky` found both, the 9 calls with the leaked key and the one with the session.
+
+### 6. Turning the key off
+Switching back to the defender, the usual first step is to deactivate the key. I did that at 18:59:08 and tried both sets of keys 20 seconds later:
+```
+$ aws iam update-access-key --user-name "$U" --access-key-id "$AK" --status Inactive
+$ x sts get-caller-identity
+An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation: The security token included in the request is invalid.
+$ xs sts get-caller-identity --query Arn --output text
+arn:aws:iam::123456789012:user/lab15-leaky
+$ xs s3 cp "s3://$B/backups/customers.csv" -
+id,name,email
+1,Test Person,test@example.com
+2,Another Person,another@example.com
+```
+The leaked key stopped working at once, and the session didn't care. It still knew who it was and still read the customer file. The [IAM docs on temporary credentials](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_control-access_disable-perms.html) say they're valid until they expire, and that you have to change the permissions to stop them. This session was made for an hour, so the attacker would have had until 19:53, and a session can be asked for 36 hours. Deactivating the key only stopped the attacker from making new sessions.
+
+That second read is also the one I'd most want to know about, and it left nothing behind. It was a data event, so CloudTrail didn't record it, and it wasn't an error, so no alert could have fired.
+
+### 7. The quarantine policy
+Next I attached the policy AWS uses when it finds a leaked key:
+```
+$ aws iam attach-user-policy --user-name "$U" --policy-arn arn:aws:iam::aws:policy/AWSCompromisedKeyQuarantineV3
+$ xs s3 ls
+... is not authorized to perform: s3:ListAllMyBuckets with an explicit deny in an identity-based policy: arn:aws:iam::aws:policy/AWSCompromisedKeyQuarantineV3
+$ xs s3 cp "s3://$B/backups/customers.csv" -
+download failed: s3://<decoy bucket>/backups/customers.csv to - An error occurred (403) when calling the HeadObject operation: Forbidden
+```
+That error names the exact policy that denied it, which I hadn't seen before. I expected the read to keep working, because I thought the policy only stopped changes. The policy itself says otherwise:
+```
+$ aws iam get-policy-version --policy-arn arn:aws:iam::aws:policy/AWSCompromisedKeyQuarantineV3 --version-id v3 --query 'length(PolicyVersion.Document.Statement[0].Action)'
+98
+$ aws iam get-policy-version --policy-arn arn:aws:iam::aws:policy/AWSCompromisedKeyQuarantineV3 --version-id v3 --query 'PolicyVersion.Document.Statement[0].Action' --output text | tr '\t' '\n' | grep -iE '^(s3|sts|cloudtrail):' | sort | paste -sd' '
+cloudtrail:LookupEvents s3:CreateBucket s3:DeleteBucket s3:DeleteBucketPolicy s3:DeleteObject s3:DeleteObjectVersion s3:GetObject s3:ListAllMyBuckets s3:ListBucket s3:ObjectOwnerOverrideToBucketOwner s3:PutAccountPublicAccessBlock s3:PutBucketAcl s3:PutBucketCors s3:PutBucketOwnershipControls s3:PutBucketPolicy s3:PutEncryptionConfiguration s3:PutLifecycleConfiguration sts:GetFederationToken sts:GetSessionToken
+```
+98 denied actions, and the S3 ones include reading objects and listing buckets. It also denies `sts:GetSessionToken`, so no new sessions, and `cloudtrail:LookupEvents`, so the attacker can't read the logs to see what I know. Because it's a deny, it applies to the session as well as the key. For this attacker it was already enough.
+
+### 8. Cutting off the session
+The quarantine policy only covers the actions on its list. To stop the session from doing anything at all, I added [revoke-sessions.json](policies/revoke-sessions.json) with the current time as the cutoff. It denies everything for credentials issued before that time:
+```
+$ CUTOFF=$(date -u +%FT%TZ); echo "cutoff $CUTOFF"
+cutoff 2026-11-09T18:59:55Z
+$ aws iam put-user-policy --user-name "$U" --policy-name revoke-sessions --policy-document "$(sed "s/CUTOFF/$CUTOFF/" policies/revoke-sessions.json)"
+$ xs s3 ls
+... is not authorized to perform: s3:ListAllMyBuckets with an explicit deny in an identity-based policy
+$ xs s3 cp "s3://$B/backups/customers.csv" -
+download failed: s3://<decoy bucket>/backups/customers.csv to - An error occurred (403) when calling the HeadObject operation: Forbidden
+$ xs sts get-caller-identity --query Arn --output text
+arn:aws:iam::123456789012:user/lab15-leaky
+```
+The error stopped naming a policy, I think because two policies deny it now. The [IAM docs on revoking sessions](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_revoke-sessions.html) explain `aws:TokenIssueTime`. The key only exists on temporary credentials, so this deny doesn't touch the user's normal access keys, only sessions older than the cutoff. A session made after the cutoff would get through, so this only works once the key that makes sessions is already off. `get-caller-identity` still answers, since it needs no permissions and can't be denied, but all it does is say who you are.
+
+CloudTrail had the session's side of this:
+```
+$ trail Username lab15-leaky
+...
+2026-11-09T18:59:32Z  us-east-1  GetCallerIdentity  ok            ASIA...  203.0.113.10
+2026-11-09T18:59:54Z  us-east-1  ListBuckets        AccessDenied  ASIA...  203.0.113.10
+2026-11-09T19:00:17Z  us-east-1  ListBuckets        AccessDenied  ASIA...  203.0.113.10
+```
+The `GetCallerIdentity` at 18:59:32 is the session still working after the key was off. The `InvalidClientTokenId` call with the dead key isn't in this search. Neither of the denied `ListBuckets` sent an email, since they're read only.
+
+### 9. Cleaning up
+I deleted the key, cleared the variables and took off the two policies I had added by hand, so Terraform only had its own things to remove:
+```
+$ aws iam delete-access-key --user-name "$U" --access-key-id "$AK"
+$ unset AK SK SAK SSK STOK
+$ aws iam detach-user-policy --user-name "$U" --policy-arn arn:aws:iam::aws:policy/AWSCompromisedKeyQuarantineV3
+$ aws iam delete-user-policy --user-name "$U" --policy-name revoke-sessions
+```
+```
+Destroy complete! Resources: 5 destroyed.
+```
+```
+users: Paolo-Admin
+decoy bucket: 404 Not Found
+lab 15 tagged resources: 0
+```
+Every step of my response sent its own `IAM change` email: `UpdateAccessKey`, `AttachUserPolicy`, `PutUserPolicy`, `DeleteAccessKey`, `DetachUserPolicy` and `DeleteUserPolicy`. The destroy sent `DeleteUserPolicy`, `DeleteUser` and a `DeleteLoginProfile`. That last one is odd, since the user never had a console password. My guess is that `force_destroy` tries to remove one just in case. So the alerts caught the defender a lot better than the attacker.
+
+The cost stays under a cent by my estimate. IAM is free, and the decoy bucket held one 82 byte file for about 10 minutes.
+
+## What Broke and How I Fixed It
+
+**My alerts missed most of the attack.** I expected an email for each of the attacker's errors and got one for each write attempt only. The EventBridge metrics showed the rules were working and matching only what they get. Read only calls never reach a rule in the normal `ENABLED` state. Setting the rules to `ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS` should fix that, but then every failed `List` or `Describe` in the account sends an email. I haven't changed lab 02 yet. I'd want to narrow the access denied rule to IAM users first.
+
+**The theft left no record.** The two reads of the customer file aren't anywhere in CloudTrail, because object reads are data events and my trail only records management events. Turning on data events for one sensitive bucket would cover it. Doing it for every bucket costs more, and I didn't turn it on for this lab.
+
+**I got the quarantine policy wrong at first.** I assumed it only blocked changes. `s3 cp` only said `Forbidden` again, because it calls `HeadObject` first, which returns no reason. Reading the policy document settled it, with `s3:GetObject` on the list. The `s3 ls` error was the more useful one, since it named the policy.
