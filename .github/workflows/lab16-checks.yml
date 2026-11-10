@@ -21,6 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+
+      - name: terraform fmt
+        working-directory: cloud/16-kubernetes-eks/terraform
+        run: terraform fmt -check -diff
+
+      - name: terraform validate
+        working-directory: cloud/16-kubernetes-eks/terraform
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -31,4 +45,4 @@ jobs:
       - name: checkov
         run: |
           pip install -q checkov==3.3.30
-          checkov -d . --framework kubernetes dockerfile --compact
+          checkov -d . --framework kubernetes dockerfile terraform --compact
