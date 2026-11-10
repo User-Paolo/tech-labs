@@ -70,3 +70,43 @@ Prices from the Pricing API for `us-east-1`, apart from the lines marked as esti
 | **Total** | | **about $85** |
 
 I have about $198 of credits left, so that leaves room for extra days or bigger nodes and still keeps a buffer. A Free plan account closes when the credits run out, so I don't want to get close to zero.
+
+### 3. Learning the basics on my PC first
+Before paying for anything I wanted to know the basic words and commands, so I installed `kubectl`, the Kubernetes command line tool, and `kind`, which runs a whole Kubernetes cluster inside one Docker container on my PC. Both were checked against their published checksums. The words that matter most so far:
+
+| Word | What it means |
+|---|---|
+| Node | A machine that runs containers. Here it's one Docker container, on EKS it will be an EC2 instance |
+| Pod | The smallest thing Kubernetes runs, one or more containers that always run together |
+| Deployment | Keeps a set number of identical pods running and replaces them when they change |
+| Service | One fixed address in front of a group of pods, since pods come and go and change IPs |
+
+The first cluster:
+
+![kind creating the practice cluster](images/01-kind-cluster.png)
+
+The node shows `NotReady` because I asked 2 seconds after it was made. A node only turns `Ready` when its network plugin is running, and that was still starting. The pods listed are Kubernetes itself, like `etcd`, where the cluster keeps all its state, and the API server that `kubectl` talks to. A few minutes later the node was `Ready` and there were 11 pods in total.
+
+Then my first app, 2 copies of nginx with a service in front of them:
+
+![A deployment with 2 nginx pods and a service](images/02-first-deployment.png)
+
+Each pod got its own IP, and the service got a fixed one that the rest of the cluster can use. Then I deleted one of the two pods on purpose:
+
+![Deleting a pod and a new one taking its place](images/03-self-healing.png)
+
+A new pod was already running a second later. The deployment wants 2, saw only 1, and made another one. Nothing I did told it to.
+
+The service only has an address inside the cluster, so to reach it from my PC I opened a tunnel with `port-forward`:
+
+![Reaching nginx through a port forward](images/04-port-forward.png)
+
+Next I scaled up to 5 copies and shipped a broken version, with an image name that doesn't exist:
+
+![Scaling to 5 and then a deploy with a broken image](images/05-broken-deploy.png)
+
+The rollout gave up after the 40 seconds I allowed it, and 4 of the 5 old pods were still running. Kubernetes replaces pods a few at a time. By default it can add 25% extra pods and have 25% unavailable while it does that, which with 5 pods means 2 extra and 1 down. So it started 3 new pods, retired 1 old one, and then stopped, because none of the new ones came up. Most of the old version kept serving the whole time. Then I rolled back:
+
+![Rolling back to the working version](images/06-rollback.png)
+
+All 5 were healthy again a few seconds later. The history only shows revisions 2 and 3. Rolling back took revision 1 and gave it the newest number, so 1 became 3.
