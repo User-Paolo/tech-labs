@@ -166,3 +166,32 @@ Last, the memory limit of 128Mi. `/eat` holds on to another 50 MB each time it's
 50, then 100, and the third call ended with exit code 137, which means the process got killed. The pod shows `OOMKilled` as the reason and 1 restart. Without the limit, one leaking app could use up a whole node's memory and take the other pods with it.
 
 My first try at the last three tests failed with `Connection refused` every time, even though the pods were healthy. Inside the pod, `localhost` points to both `127.0.0.1` and the IPv6 address `::1`. My guess is that `wget` tried `::1`, where my app doesn't listen. The health checks were fine because they use the pod's IPv4 address. Using `127.0.0.1` fixed it.
+
+### 5. The Terraform for the paid week
+Everything for EKS is in [terraform/](terraform/), written and checked before anything runs:
+
+| File | What it builds |
+|---|---|
+| [network.tf](terraform/network.tf) | A VPC in 2 zones, with public subnets for load balancers and private subnets for the nodes and pods. One NAT gateway lets the nodes reach the internet. A real setup would have one per zone, but that doubles the cost |
+| [eks.tf](terraform/eks.tf) | The cluster on 1.37, kept on standard support, with Secrets encrypted by my own KMS key and all the control plane logs in CloudWatch for 7 days. The network plugin has network policies switched on, since on EKS that's off by default |
+| [nodes.tf](terraform/nodes.tf) | Two groups of ARM nodes, 2 normal `t4g.large` and 2 Spot ones that can be any of 3 types with the same size. Pods can't reach the nodes' own AWS credentials |
+| [ecr.tf](terraform/ecr.tf) | A private registry for my image. Tags can't be overwritten and every push gets scanned |
+| [lb-controller.tf](terraform/lb-controller.tf) | The role for the AWS Load Balancer Controller, which turns a Kubernetes ingress into a real load balancer. The policy is the official one from the controller's repo at v3.6.2, and only the controller's own service account can use the role |
+
+The cluster API is reachable from the internet, so `admin_cidrs` has no default and refuses `0.0.0.0/0`. I set it to my CloudShell address when I load `~/lab16.env`. Logging in still needs my IAM user, so this is only an extra layer.
+
+checkov passed 96 checks on the Terraform with 16 skips, and the [workflow](../../.github/workflows/lab16-checks.yml) now runs `terraform fmt`, `validate` and checkov on it too. One skip is because checkov's list of supported versions doesn't include 1.37 yet.
+
+A plan creates nothing, so I ran one in CloudShell to see what AWS would make:
+```
+$ terraform plan -no-color -out=/tmp/lab16.plan | grep -E 'Plan:|Error'
+Plan: 38 to add, 0 to change, 0 to destroy.
+```
+The registry is the only part I hadn't checked against the Free plan yet, so I made an empty one and deleted it straight away:
+```
+$ aws ecr create-repository --repository-name lab16-freeplan-test --query repository.repositoryName --output text
+lab16-freeplan-test
+$ aws ecr delete-repository --repository-name lab16-freeplan-test --query repository.repositoryName --output text
+lab16-freeplan-test
+```
+ECR is allowed.
