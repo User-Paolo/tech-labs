@@ -110,3 +110,59 @@ The rollout gave up after the 40 seconds I allowed it, and 4 of the 5 old pods w
 ![Rolling back to the working version](images/06-rollback.png)
 
 All 5 were healthy again a few seconds later. The history only shows revisions 2 and 3. Rolling back took revision 1 and gave it the newest number, so 1 became 3.
+
+### 4. My own app, written as YAML
+Typing commands one at a time is fine for learning, but nothing is saved anywhere. Real setups keep everything in files and apply them, so that's what I did next, with a small app of my own that I can also take to EKS:
+
+| File | What's in it |
+|---|---|
+| [app/app.py](app/app.py) | A tiny web app with no libraries. It says hello with a greeting from its settings, its version and which pod answered, and whether it found its secret. It also has two paths for health checks and two that break it on purpose |
+| [app/Dockerfile](app/Dockerfile) | Builds the app into an image that runs as a normal user, not root |
+| [k8s/namespace.yaml](k8s/namespace.yaml) | Its own space in the cluster, `lab16` |
+| [k8s/config.yaml](k8s/config.yaml) | The settings, as a ConfigMap |
+| [k8s/deployment.yaml](k8s/deployment.yaml) | 3 copies, with health checks, memory and CPU limits, the secret mounted as a file and locked down security settings |
+| [k8s/service.yaml](k8s/service.yaml) | The fixed address in front of the pods |
+| [k8s/network-policy.yaml](k8s/network-policy.yaml) | Only pods inside `lab16` can reach the app |
+
+checkov can check Kubernetes files and Dockerfiles as well as Terraform. It passed 95 checks with 3 skips, and two of those are only there because the image exists on my PC and not in a registry yet. It also preferred the secret mounted as a file over an environment variable, so I changed that. The [workflow](../../.github/workflows/lab16-checks.yml) runs the same checks on every push.
+
+The secret itself isn't in the repo. I made it with a random value straight in the cluster, so it never gets printed:
+```
+kubectl -n lab16 create secret generic web-secret --from-literal=api-key="$(openssl rand -hex 16)"
+```
+
+![Building the image and applying the files](images/07-own-app-apply.png)
+
+The app waits 10 seconds before its `/ready` path says yes, to act like an app that needs time to start:
+
+![The pods running but not ready for about 15 seconds](images/08-readiness.png)
+
+The pods were running after 5 seconds and only became ready at about 15. Until then they got no traffic. With nginx last time there was no wait at all, because nginx is ready as soon as it starts.
+
+Then I called the service 6 times from a pod inside `lab16`, once from a pod outside it, and looked at how the secret is stored:
+
+![Requests spread over the pods, the network policy and the secret](images/09-requests-policy-secret.png)
+
+The 6 requests reached all 3 pods, just not evenly. The service picks a pod at random for each new connection, so 6 requests won't come out as 2 each. The request from the `default` namespace timed out with curl's exit code 28, so the network policy really blocks it here. The line I blacked out was the start of the stored secret, and decoding it gave back all 32 characters of the key. A Kubernetes Secret is only encoded, so anyone who's allowed to read Secrets can read the value. On EKS I want them encrypted with a KMS key like in [lab 14](../14-iam-kms/).
+
+Next I made one pod fail its health check on purpose:
+
+![The liveness check failing and the container being restarted](images/10-liveness.png)
+
+The events show the liveness check getting a `500` and the container being restarted. The restart count still said 0 because I looked at the exact moment it happened. Kubernetes restarts the container inside the same pod, so the pod keeps its name, which is different from deleting a pod like in step 3.
+
+Then I changed the greeting in the ConfigMap directly in the cluster, without touching the file:
+
+![Changing the ConfigMap and restarting the pods](images/11-config-drift-1.png)
+
+![Applying the files again](images/12-config-drift-2.png)
+
+The running pods kept the old greeting, because they only read their settings when they start. After a restart they said `hello again`. Then I applied the files from the repo again. The ConfigMap went back to `hello from kind`, but the pods kept saying `hello again`, because the deployment file hadn't changed, so nothing restarted them. The settings in the cluster and what the pods were doing no longer matched, and nothing showed an error. The next restart, for any reason, would quietly change the greeting.
+
+Last, the memory limit of 128Mi. `/eat` holds on to another 50 MB each time it's called:
+
+![The container killed for using too much memory](images/13-out-of-memory.png)
+
+50, then 100, and the third call ended with exit code 137, which means the process got killed. The pod shows `OOMKilled` as the reason and 1 restart. Without the limit, one leaking app could use up a whole node's memory and take the other pods with it.
+
+My first try at the last three tests failed with `Connection refused` every time, even though the pods were healthy. Inside the pod, `localhost` points to both `127.0.0.1` and the IPv6 address `::1`. My guess is that `wget` tried `::1`, where my app doesn't listen. The health checks were fine because they use the pod's IPv4 address. Using `127.0.0.1` fixed it.
