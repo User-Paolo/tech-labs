@@ -118,11 +118,11 @@ Typing commands one at a time is fine for learning, but nothing is saved anywher
 |---|---|
 | [app/app.py](app/app.py) | A tiny web app with no libraries. It says hello with a greeting from its settings, its version and which pod answered, and whether it found its secret. It also has two paths for health checks and two that break it on purpose |
 | [app/Dockerfile](app/Dockerfile) | Builds the app into an image that runs as a normal user, not root |
-| [k8s/namespace.yaml](k8s/namespace.yaml) | Its own space in the cluster, `lab16` |
-| [k8s/config.yaml](k8s/config.yaml) | The settings, as a ConfigMap |
-| [k8s/deployment.yaml](k8s/deployment.yaml) | 3 copies, with health checks, memory and CPU limits, the secret mounted as a file and locked down security settings |
-| [k8s/service.yaml](k8s/service.yaml) | The fixed address in front of the pods |
-| [k8s/network-policy.yaml](k8s/network-policy.yaml) | Only pods inside `lab16` can reach the app |
+| [k8s/base/namespace.yaml](k8s/base/namespace.yaml) | Its own space in the cluster, `lab16` |
+| [k8s/base/config.yaml](k8s/base/config.yaml) | The settings, as a ConfigMap |
+| [k8s/base/deployment.yaml](k8s/base/deployment.yaml) | 3 copies, with health checks, memory and CPU limits, the secret mounted as a file and locked down security settings |
+| [k8s/base/service.yaml](k8s/base/service.yaml) | The fixed address in front of the pods |
+| [k8s/base/network-policy.yaml](k8s/base/network-policy.yaml) | Only pods inside `lab16` can reach the app |
 
 checkov can check Kubernetes files and Dockerfiles as well as Terraform. It passed 95 checks with 3 skips, and two of those are only there because the image exists on my PC and not in a registry yet. It also preferred the secret mounted as a file over an environment variable, so I changed that. The [workflow](../../.github/workflows/lab16-checks.yml) runs the same checks on every push.
 
@@ -195,3 +195,41 @@ $ aws ecr delete-repository --repository-name lab16-freeplan-test --query reposi
 lab16-freeplan-test
 ```
 ECR is allowed.
+
+### 6. A database, first on my PC
+On EKS the app will keep a visit counter in a PostgreSQL database on RDS. RDS costs money for every hour it runs, so I practised with PostgreSQL inside kind first.
+
+The app now uses [pg8000](https://pypi.org/project/pg8000/) to talk to the database and boto3 to read the database password from Secrets Manager on EKS. On my PC it reads the password from a mounted file instead. So the line in step 4 about the app having no libraries isn't true anymore.
+
+The same app needs different settings on my PC and on EKS, so I split the Kubernetes files with kustomize:
+
+| Folder | What's in it |
+|---|---|
+| [k8s/base/](k8s/base/) | The 5 files from step 4, with no image tag |
+| [k8s/kind/](k8s/kind/) | A practice PostgreSQL, a small change that points the app at it, and the image tag |
+
+Later a `k8s/eks/` folder will point the app at RDS instead. `kubectl apply -k k8s/kind` puts the two together. checkov didn't like the small change file on its own, because it read it as a whole deployment with everything missing. So the workflow now builds each folder first and checks the result. That passed 176 checks with 5 skips.
+
+PostgreSQL runs as a StatefulSet, which gives its pod a fixed name and its own disk that stays when the pod goes away. It also got its own network policy, so only pods labeled `app: web` can reach port 5432. I made its password the same way as the app's secret in step 4, so it never got printed:
+
+![Building v3 and applying the kind folder](images/14-database-apply.png)
+
+PostgreSQL started first and the 3 web pods were replaced one at a time. The disk `data-postgres-0` was created and is `Bound`.
+
+Then I called the app 6 times, and tried to reach the database from a pod named `sneaky` that's in `lab16` but doesn't have the `app: web` label:
+
+![The visit counter and the database policy](images/15-visit-counter-policy.png)
+
+The count went from 1 to 6. All 6 requests landed on the same pod this time, which happens about 1 time in 243. I sent 12 more and they reached all 3 pods while the count kept going up, so the 3 pods really share one counter. `sneaky` got curl's timeout code 28, so being in the right namespace isn't enough to reach the database.
+
+Then I deleted the database pod to see if the data would survive:
+
+![Deleting the database pod](images/16-database-restart.png)
+
+It did. The new pod had the same name, it was 11 seconds old while the disk was still 4m37s old, and the count went on from 19 instead of starting again at 1. The first request came while PostgreSQL was still starting, so the `InterfaceError` there was fair. The two other errors came after it was ready. Each web pod was still holding its connection to the old database. It found out on the next request that the connection was dead and threw it away, and only the request after that got a new one. So every pod turned one visitor away after the database came back. RDS with a standby in a second zone does the same kind of restart when it fails over, so I wanted this fixed before EKS.
+
+Now when a request fails on an old connection, the app opens a new one and tries once more. If a new connection fails too, the database really is down and it gives up. One catch is that a retry could count a visit twice if the update went through just before the connection died, which is fine for a visit counter. I built that as v4 and did the same test:
+
+![The same test with v4](images/17-retry-fix.png)
+
+23 to 28 with no errors. kubectl said `configured` for the StatefulSet and both policies even though I hadn't changed them. `kubectl diff -k k8s/kind` showed no difference and the StatefulSet still had only 1 revision, so nothing really changed there. My guess is kubectl says `configured` whenever it sends an update, even an empty one.
