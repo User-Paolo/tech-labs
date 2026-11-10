@@ -22,6 +22,7 @@ If you're working through the same material, feel free to look around and compar
 | [13 Serverless](cloud/13-serverless/) | Cloud | Lambda, API Gateway, DynamoDB, cold starts, Lambda concurrency, cost per request | Done |
 | [14 IAM policy logic and KMS](cloud/14-iam-kms/) | Cloud | IAM policy evaluation, explicit deny, permissions boundaries, resource based policies, KMS key policies | Done |
 | [15 Leaked access key drill](cloud/15-leaked-key/) | Cloud | Access keys, STS session tokens, CloudTrail, incident response, quarantine policies | Done |
+| [16 Final project, Kubernetes on EKS](cloud/16-kubernetes-eks/) | Cloud | Kubernetes, Amazon EKS, kind, Spot Instances, Managed Prometheus, RDS, detection and auto response | In progress |
 
 ## How Each Lab Is Laid Out
 Every lab follows the same [template](LAB_TEMPLATE.md). It starts with the question I had and the setup I used, then goes through the steps with the commands, configs and screenshots, and ends with what broke and how I fixed it.
