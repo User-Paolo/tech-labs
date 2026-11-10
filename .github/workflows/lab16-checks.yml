@@ -45,4 +45,12 @@ jobs:
       - name: checkov
         run: |
           pip install -q checkov==3.3.30
-          checkov -d . --framework kubernetes dockerfile terraform --compact
+          checkov -d . --framework dockerfile terraform --compact
+
+      - name: checkov on each rendered overlay
+        run: |
+          for o in k8s/*/; do
+            [ "$o" = k8s/base/ ] && continue
+            kubectl kustomize "$o" > /tmp/rendered.yaml
+            checkov -f /tmp/rendered.yaml --framework kubernetes --compact
+          done

@@ -28,7 +28,7 @@ spec:
             secretName: web-secret
       containers:
         - name: web
-          image: lab16-app:v2
+          image: lab16-app
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

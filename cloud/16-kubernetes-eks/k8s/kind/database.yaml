@@ -1,0 +1,24 @@
+# Points the app at the practice database on my PC
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: lab16
+spec:
+  template:
+    spec:
+      volumes:
+        - name: db-password
+          secret:
+            secretName: postgres-password
+      containers:
+        - name: web
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PASSWORD_FILE
+              value: /var/run/secrets/db/password
+          volumeMounts:
+            - name: db-password
+              mountPath: /var/run/secrets/db
+              readOnly: true

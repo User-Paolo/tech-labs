@@ -1,0 +1,115 @@
+# A practice database for my PC only, on EKS this is RDS
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: lab16
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=A practice database on my PC, pinned by tag
+    checkov.io/skip2: CKV_K8S_35=The official image only reads its password from a variable or a file named in a variable
+    checkov.io/skip3: CKV_K8S_40=The official alpine image runs postgres as uid 70
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: password
+          secret:
+            secretName: postgres-password
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          imagePullPolicy: Always
+          env:
+            - name: POSTGRES_PASSWORD_FILE
+              value: /var/run/secrets/db/password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: password
+              mountPath: /var/run/secrets/db
+              readOnly: true
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: lab16
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+---
+# Only the app can reach the database
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: lab16
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: web
+      ports:
+        - port: 5432
