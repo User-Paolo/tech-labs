@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: lab16
+data:
+  GREETING: "hello from kind"
+  PAGE_VERSION: "v2"
+  WARMUP_SECONDS: "10"

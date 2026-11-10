@@ -1,0 +1,34 @@
+name: lab 16 checks
+
+on:
+  push:
+    paths:
+      - "cloud/16-kubernetes-eks/**"
+      - ".github/workflows/lab16-checks.yml"
+  pull_request:
+    paths:
+      - "cloud/16-kubernetes-eks/**"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud/16-kubernetes-eks
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: app compiles
+        run: python -m py_compile app/app.py
+
+      - name: checkov
+        run: |
+          pip install -q checkov==3.3.30
+          checkov -d . --framework kubernetes dockerfile --compact
