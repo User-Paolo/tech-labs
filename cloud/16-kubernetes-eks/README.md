@@ -233,3 +233,35 @@ Now when a request fails on an old connection, the app opens a new one and tries
 ![The same test with v4](images/17-retry-fix.png)
 
 23 to 28 with no errors. kubectl said `configured` for the StatefulSet and both policies even though I hadn't changed them. `kubectl diff -k k8s/kind` showed no difference and the StatefulSet still had only 1 revision, so nothing really changed there. My guess is kubectl says `configured` whenever it sends an update, even an empty one.
+
+### 7. The database and the app's files for EKS
+The database for the paid week is in [terraform/rds.tf](terraform/rds.tf):
+
+| Part | What it does |
+|---|---|
+| The database | PostgreSQL 17 on `db.t4g.micro` with a standby in the second zone, in the private subnets, encrypted with the lab's KMS key and with 1 day of backups. In [lab 12](../12-databases/) the Free plan refused 7 days and accepted 1 |
+| Password | AWS makes it and keeps it in Secrets Manager, so it isn't in Terraform, the state or the repo |
+| Security group | Only the cluster security group can reach port 5432. EKS gives that group to the nodes, and the pods use their node's group |
+| Settings | Connections without TLS get refused, every login gets logged for the detection part, and so does any query slower than a second |
+| The app's role | It can read that one secret and use the KMS key only through Secrets Manager. Pod Identity gives it only to the `web` service account in `lab16` |
+
+The standby in a second zone still counts as 1 instance on the Free plan, so I'm under the limit of 2. checkov passed 138 checks with 23 skips, and the plan grew from 38 to 47:
+
+![The plan with the database and the app's role](images/18-rds-plan.png)
+
+The data source for the app's policy can only be read during the apply, because the secret's ARN doesn't exist until the database does.
+
+Then the third kustomize folder, [k8s/eks/](k8s/eks/). It uses the same base as my PC with these changes:
+
+- the image comes from ECR with tag v4
+- a `web` service account for Pod Identity
+- the database address and secret ARN, plus `DB_CA_FILE` pointing at the RDS certificates, so the app checks it's really talking to RDS
+- an ingress that the AWS Load Balancer Controller turns into an ALB, which sends traffic straight to the pod addresses
+- one more rule in the network policy for the public subnets, where the ALB sits
+- the greeting changes to `hello from EKS`
+
+The ECR address, the database address and the secret ARN all have my account ID or a random ID in them, so they can't be in the repo. The folder has fake values, and [deploy.sh](k8s/eks/deploy.sh) copies it to `/tmp`, fills in the real ones from `terraform output` and applies the copy. The workflow finds the new folder on its own and checkov passed 97 checks on it.
+
+The certificates were the one thing that didn't make it into my first commit. My `.gitignore` skips every `.pem` file so a private key can't get pushed by accident, and the RDS bundle was called `rds-ca.pem`. It only holds the 3 public root certificates for `us-east-1`, so I renamed it to `rds-ca.crt` instead of loosening the rule.
+
+The nodes are ARM and my PC builds x86 images, so the image has to be built for `linux/arm64` before it goes to ECR. That's the first thing to sort out when the cluster is up.
