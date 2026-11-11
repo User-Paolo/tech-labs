@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - service-account.yaml
+  - ingress.yaml
+images:
+  - name: lab16-app
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/lab16-app
+    newTag: v4
+configMapGenerator:
+  - name: db-config
+    namespace: lab16
+    envs:
+      - db.env
+  - name: rds-ca
+    namespace: lab16
+    files:
+      - rds-ca.crt
+patches:
+  - path: config.yaml
+  - path: database.yaml
+  - target:
+      kind: NetworkPolicy
+      name: web
+    patch: |-
+      - op: add
+        path: /spec/ingress/-
+        value:
+          from:
+            - ipBlock:
+                cidr: 10.16.0.0/23
+          ports:
+            - port: 8080

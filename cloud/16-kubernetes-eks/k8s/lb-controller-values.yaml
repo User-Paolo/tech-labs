@@ -1,0 +1,7 @@
+# For the aws-load-balancer-controller chart 3.6.2, vpcId comes from terraform output at install
+# Pods can't reach the node metadata, so the region and VPC have to be given here
+clusterName: lab16
+region: us-east-1
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller

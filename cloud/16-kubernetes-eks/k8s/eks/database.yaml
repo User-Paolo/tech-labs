@@ -1,0 +1,42 @@
+# Points the app at RDS, with the password from Secrets Manager and TLS
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: lab16
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=The tag in ECR can't be overwritten, the registry refuses it
+    checkov.io/skip2: CKV_K8S_15=The tag in ECR can't be overwritten, so pulling once is enough
+spec:
+  template:
+    spec:
+      serviceAccountName: web
+      volumes:
+        - name: rds-ca
+          configMap:
+            name: rds-ca
+      containers:
+        - name: web
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: db-config
+                  key: DB_HOST
+            - name: DB_SECRET_ARN
+              valueFrom:
+                configMapKeyRef:
+                  name: db-config
+                  key: DB_SECRET_ARN
+            - name: DB_USER
+              value: labadmin
+            - name: DB_NAME
+              value: lab16
+            - name: DB_CA_FILE
+              value: /etc/rds/rds-ca.crt
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          volumeMounts:
+            - name: rds-ca
+              mountPath: /etc/rds
+              readOnly: true
