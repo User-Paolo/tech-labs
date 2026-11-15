@@ -1,0 +1,15 @@
+# Pods that don't ask for anything get these, so one pod can't eat a whole node
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: lab16
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi

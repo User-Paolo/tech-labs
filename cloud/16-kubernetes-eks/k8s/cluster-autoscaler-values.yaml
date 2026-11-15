@@ -1,0 +1,15 @@
+# For the cluster-autoscaler chart 9.60.0 (autoscaler v1.37.0, same minor as the cluster)
+autoDiscovery:
+  clusterName: lab16
+awsRegion: us-east-1
+rbac:
+  serviceAccount:
+    create: true
+    name: cluster-autoscaler
+image:
+  tag: v1.37.0
+extraArgs:
+  balance-similar-node-groups: true
+  expander: least-waste
+  # Shorter than the 10 minute default so a test fits in an afternoon
+  scale-down-unneeded-time: 5m

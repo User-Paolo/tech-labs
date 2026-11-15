@@ -1,0 +1,27 @@
+# For the grafana chart 10.5.15, reached with port-forward only
+serviceAccount:
+  create: true
+  name: grafana
+admin:
+  existingSecret: grafana-admin
+  userKey: user
+  passwordKey: password
+persistence:
+  enabled: false
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: CloudWatch
+        type: cloudwatch
+        isDefault: true
+        jsonData:
+          authType: default
+          defaultRegion: us-east-1

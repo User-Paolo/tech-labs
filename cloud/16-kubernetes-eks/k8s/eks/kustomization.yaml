@@ -18,6 +18,14 @@ configMapGenerator:
     files:
       - rds-ca.crt
 patches:
+  # Room for the scaling test, more pods than 2 nodes can hold
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/maxReplicas
+        value: 40
   - path: config.yaml
   - path: database.yaml
   - target:

@@ -7,3 +7,4 @@ resources:
   - service.yaml
   - network-policy.yaml
   - hpa.yaml
+  - limit-range.yaml
