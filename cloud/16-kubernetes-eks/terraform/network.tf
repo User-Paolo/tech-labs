@@ -3,7 +3,6 @@ locals {
 }
 
 resource "aws_vpc" "main" {
-  #checkov:skip=CKV2_AWS_11:Flow logs come with the detection part of this lab
   cidr_block           = "10.16.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
