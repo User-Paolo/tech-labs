@@ -318,3 +318,26 @@ Then I stopped the load:
 ![Scaling down after the load stopped](images/25-scale-down.png)
 
 The CPU was back to 2% within a minute, but the pods stayed at 10 for about 5 more minutes and then dropped straight to 3. By default the autoscaler waits 5 minutes before scaling down, so a short quiet moment doesn't throw away pods that would be needed again right after. Adding pods is fast and removing them is slow.
+
+### 10. The last pieces before the paid week
+The rest of the Terraform for the cluster:
+
+| File | What it adds |
+|---|---|
+| [flow-logs.tf](terraform/flow-logs.tf) | VPC flow logs for every connection, accepted or rejected, kept in CloudWatch for 7 days |
+| [cluster-autoscaler.tf](terraform/cluster-autoscaler.tf) | A role for the cluster autoscaler, which adds nodes when pods don't fit. It can look at everything, but it can only resize the Auto Scaling groups tagged for `lab16` |
+| [monitoring.tf](terraform/monitoring.tf) | Container Insights as an EKS addon, with container logs off to keep the cost down, and a role for Grafana that can only read CloudWatch |
+
+I had Managed Prometheus in the plan, but its scraper needs extra access setup that I couldn't check before the cluster exists. Container Insights is one addon with a normal Pod Identity role, so there's less that can go wrong during the week I'm paying for.
+
+The Kubernetes side got Helm settings for the [cluster autoscaler](k8s/cluster-autoscaler-values.yaml) and [Grafana](k8s/grafana-values.yaml), a [LimitRange](k8s/base/limit-range.yaml) so a pod with no limits gets 500m CPU at most instead of 5 and a half cores like my load pod, and room for 40 pods on EKS instead of 10. Step 9 showed the app wanting about 40 under load, which won't fit on 2 nodes, so the cluster autoscaler will have to add more.
+
+The last gap from [lab 15](../15-leaked-key/) was that downloading a file from S3 left no record, because object reads are data events and my trail only had management events. Logging data events for every bucket costs money, so I made a decoy bucket called `lab16-backups-...` with a fake `exports/customers.csv` and a trail in [data-events.tf](detection/data-events.tf) that only logs object calls in that bucket. Nobody has a reason to open it, so a download means someone is looking around. The alert only fires on `GetObject`, because `terraform plan` checks the file every time and I don't want an email for that.
+
+![Downloading the decoy file and resetting the canary](images/26-decoy-test.png)
+
+![The email about the download](images/27-decoy-email.png)
+
+I downloaded it at 04:37:38 and the email had the event at 04:37:39. This rule is in the normal `ENABLED` state and still got the download, so the special state from step 8 only matters for management events like `get-caller-identity`. Data events reach EventBridge anyway once a trail logs them.
+
+[reset-canary.sh](detection/reset-canary.sh) puts the canary user from step 8 back the way Terraform made it, with no keys and no quarantine policies, so it's ready for the paid week.
