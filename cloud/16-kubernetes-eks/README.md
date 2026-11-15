@@ -297,3 +297,24 @@ The lab 02 rules saw the Lambda's role turning off the key and attaching the two
 Every call with the key set off the Lambda again, so it ran 3 times. Only the first one did anything, and the other two saw the user was already locked and stopped, so I only got one "locked" email. The first two runs were billed longer than they took, because each started a new copy of the function and AWS bills that start up time too. The third reused a warm copy and was billed exactly its 300 ms.
 
 One gap I know of: the rule is only in `us-east-1`. A call made through another region's endpoint shows up in that region, and the lab 02 rules that forward events to `us-east-1` only get write calls. My guess is that a `get-caller-identity` from `eu-west-1` would go unseen. This setup stays on through the paid week.
+
+### 9. Scaling pods on my PC
+I replaced my SSD between sessions, so this started on a fresh WSL install with Docker installed again and a new kind cluster.
+
+The app now has a HorizontalPodAutoscaler in [k8s/base/hpa.yaml](k8s/base/hpa.yaml). It keeps between 3 and 10 pods and adds more when the average CPU goes over half of what each pod asks for, which is 25m. I also took `replicas: 3` out of the deployment. If both the file and the autoscaler set the number, every `kubectl apply` puts it back to 3, even in the middle of a scale up. The autoscaler needs metrics-server to measure the pods, and on kind it needs `--kubelet-insecure-tls` because the nodes use certificates they signed themselves. That's fine for practice and nothing I'd do on a real cluster.
+
+![The new cluster with the autoscaler and metrics-server](images/23-autoscaler-setup.png)
+
+The deployment started with 1 pod and the autoscaler raised it to 3 straight away, with the reason `Current number of replicas below Spec.MinReplicas`. For the first minute it showed `<unknown>`, because metrics-server didn't have any numbers yet.
+
+Then I started a pod with 8 curl loops calling the app nonstop:
+
+![Scaling up under load](images/24-scale-up.png)
+
+It went from 3 to 6 pods and then to 10 in about 30 seconds. At 10 it was still around 200%, so it would have wanted about 40 pods, but 10 is the maximum I set. On EKS that's where the cluster autoscaler comes in and adds nodes, since 40 pods won't fit on 2. The load pod itself used 5441m, about 5 and a half CPU cores, while all 10 web pods together used about 870m. Starting a new curl process for every request costs a lot more than answering it. It also had no limit at all, because nothing in `lab16` gives pods a default one, so on a real node it could starve everything else. A VM was running on my laptop at the same time, so the exact numbers are rough, but the pattern is what I wanted to see.
+
+Then I stopped the load:
+
+![Scaling down after the load stopped](images/25-scale-down.png)
+
+The CPU was back to 2% within a minute, but the pods stayed at 10 for about 5 more minutes and then dropped straight to 3. By default the autoscaler waits 5 minutes before scaling down, so a short quiet moment doesn't throw away pods that would be needed again right after. Adding pods is fast and removing them is slow.
