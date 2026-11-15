@@ -265,3 +265,35 @@ The ECR address, the database address and the secret ARN all have my account ID 
 The certificates were the one thing that didn't make it into my first commit. My `.gitignore` skips every `.pem` file so a private key can't get pushed by accident, and the RDS bundle was called `rds-ca.pem`. It only holds the 3 public root certificates for `us-east-1`, so I renamed it to `rds-ca.crt` instead of loosening the rule.
 
 The nodes are ARM and my PC builds x86 images, so the image has to be built for `linux/arm64` before it goes to ECR. That's the first thing to sort out when the cluster is up.
+
+### 8. A leaked key that locks itself
+In [lab 15](../15-leaked-key/) I did the whole response by hand after reading the alert emails, and the lab 02 rules never even saw the read only calls the attacker made. So before the paid week I built the response into the account, in its own folder, [detection/](detection/), which can run on its own without the cluster:
+
+| Part | What it does |
+|---|---|
+| [canary.tf](detection/canary.tf) | A user called `lab16-canary` with no permissions at all. Nobody should ever use its key, so any call with it means the key leaked |
+| The rule in [quarantine.tf](detection/quarantine.tf) | Matches any call by that user. It's set to `ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`, so it gets read only calls too. It emails me through the lab 02 topic and starts the Lambda |
+| [lambda/quarantine.py](detection/lambda/quarantine.py) | Turns off the user's keys, attaches `AWSCompromisedKeyQuarantineV3`, adds the `TokenIssueTime` deny from lab 15 so older sessions stop working, and emails me how long it took |
+| The Lambda's role | It can only touch users under the path `/canary/`, and the only policy it can attach is the quarantine one. It could never lock my own user |
+
+Terraform doesn't make the key, so its secret never ends up in the state file. checkov passed 37 checks with 9 skips, and the plan was 9 resources.
+
+For the test I made the key in CloudShell straight into two variables, so it never got printed. Then I used it the way an attacker would and kept trying every 5 seconds until it stopped working:
+
+![Using the canary key until it stopped working](images/19-canary-test.png)
+
+The first call was at 03:35:48, and these emails came in:
+
+![The alert from the rule](images/20-canary-alert-email.png)
+
+![The email from the Lambda](images/21-canary-locked-email.png)
+
+![The lab 02 IAM alerts showing the Lambda's changes](images/22-quarantine-iam-emails.png)
+
+The Lambda locked the key 3 seconds after the call. The key still worked once more at 03:35:54 and only got refused at 03:36:00, 12 seconds after the first use. IAM changes take a few seconds to reach every AWS server, so even an instant response leaves a short window. In lab 15 the key worked until I read the email and acted, so this is still a lot better.
+
+The lab 02 rules saw the Lambda's role turning off the key and attaching the two policies, which is a nice record that the response happened. The alert also shows the tool the attacker used, here `exec-env/CloudShell` and the exact command. A real attacker can fake that, but it's a free clue.
+
+Every call with the key set off the Lambda again, so it ran 3 times. Only the first one did anything, and the other two saw the user was already locked and stopped, so I only got one "locked" email. The first two runs were billed longer than they took, because each started a new copy of the function and AWS bills that start up time too. The third reused a warm copy and was billed exactly its 300 ms.
+
+One gap I know of: the rule is only in `us-east-1`. A call made through another region's endpoint shows up in that region, and the lab 02 rules that forward events to `us-east-1` only get write calls. My guess is that a `get-caller-identity` from `eu-west-1` would go unseen. This setup stays on through the paid week.
