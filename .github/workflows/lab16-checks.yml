@@ -35,12 +35,21 @@ jobs:
           terraform init -backend=false -input=false
           terraform validate
 
+      - name: terraform fmt and validate, detection
+        working-directory: cloud/16-kubernetes-eks/detection
+        run: |
+          terraform fmt -check -diff
+          terraform init -backend=false -input=false
+          terraform validate
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: app compiles
-        run: python -m py_compile app/app.py
+      - name: python compiles
+        run: |
+          python -m py_compile app/app.py
+          python -m py_compile detection/lambda/quarantine.py
 
       - name: checkov
         run: |
