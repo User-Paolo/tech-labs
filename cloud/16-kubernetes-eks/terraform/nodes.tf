@@ -87,6 +87,7 @@ resource "aws_eks_node_group" "base" {
   depends_on = [aws_iam_role_policy_attachment.node, aws_eks_addon.vpc_cni, aws_eks_addon.kube_proxy, aws_eks_addon.pod_identity]
 }
 
+# Same size types so any of them can replace another
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "spot"
@@ -94,7 +95,7 @@ resource "aws_eks_node_group" "spot" {
   subnet_ids      = aws_subnet.private[*].id
   ami_type        = "AL2023_ARM_64_STANDARD"
   capacity_type   = "SPOT"
-  instance_types  = ["t4g.small"]
+  instance_types  = ["t4g.small", "t9g.small"]
   labels          = { capacity = "spot" }
 
   launch_template {
