@@ -1,0 +1,71 @@
+# Load for the scaling test, started with kubectl scale and back to 0 after
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load
+  namespace: lab16
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=The image comes from my ECR repo by tag, the same one the app uses
+    checkov.io/skip2: CKV_K8S_8=It only sends requests and has nothing to check
+    checkov.io/skip3: CKV_K8S_9=It only sends requests and has nothing to check
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: load
+  template:
+    metadata:
+      labels:
+        app: load
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: lab16-app
+          imagePullPolicy: Always
+          # 8 threads asking for /ready nonstop, so the database isn't part of it
+          command:
+            - python
+            - -c
+            - |
+              import http.client, threading
+              def hit():
+                  c = http.client.HTTPConnection("web", 80, timeout=5)
+                  while True:
+                      try:
+                          c.request("GET", "/ready")
+                          c.getresponse().read()
+                      except Exception:
+                          c.close()
+              for _ in range(8):
+                  threading.Thread(target=hit, daemon=True).start()
+              threading.Event().wait()
+          resources:
+            requests:
+              cpu: 250m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# Nothing needs to reach the load pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: load
+  namespace: lab16
+spec:
+  podSelector:
+    matchLabels:
+      app: load
+  policyTypes: ["Ingress"]

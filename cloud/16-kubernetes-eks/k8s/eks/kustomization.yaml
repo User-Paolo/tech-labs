@@ -4,6 +4,7 @@ resources:
   - ../base
   - service-account.yaml
   - ingress.yaml
+  - load.yaml
 images:
   - name: lab16-app
     newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/lab16-app
