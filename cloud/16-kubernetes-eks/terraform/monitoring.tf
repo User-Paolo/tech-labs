@@ -10,9 +10,13 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
 }
 
 resource "aws_eks_addon" "observability" {
-  cluster_name         = aws_eks_cluster.main.name
-  addon_name           = "amazon-cloudwatch-observability"
-  configuration_values = jsonencode({ containerLogs = { enabled = false } })
+  cluster_name = aws_eks_cluster.main.name
+  addon_name   = "amazon-cloudwatch-observability"
+  # Application Signals is on by default and puts tracing into every pod, so it's off
+  configuration_values = jsonencode({
+    containerLogs = { enabled = false }
+    manager       = { applicationSignals = { autoMonitor = { monitorAllServices = false } } }
+  })
 
   pod_identity_association {
     service_account = "cloudwatch-agent"
