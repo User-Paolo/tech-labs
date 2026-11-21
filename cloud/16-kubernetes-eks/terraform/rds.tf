@@ -24,9 +24,11 @@ resource "aws_db_parameter_group" "main" {
   name   = "lab16-postgres17"
   family = "postgres17"
 
+  # RDS saves this one for the next reboot
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   parameter {
