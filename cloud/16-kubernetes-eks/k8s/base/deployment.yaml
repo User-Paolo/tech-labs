@@ -57,6 +57,11 @@ spec:
               port: 8080
             periodSeconds: 5
             failureThreshold: 2
+          # Gives the load balancer a moment to stop sending requests here first
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -1,7 +1,9 @@
 import json
 import os
+import signal
 import socket
 import ssl
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -99,4 +101,6 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, body)
 
 
+# PID 1 ignores SIGTERM without a handler, so Kubernetes had to wait 30 s and kill it
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 ThreadingHTTPServer(("", 8080), Handler).serve_forever()

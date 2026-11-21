@@ -5,6 +5,6 @@ resources:
   - postgres.yaml
 images:
   - name: lab16-app
-    newTag: v4
+    newTag: v5
 patches:
   - path: database.yaml
