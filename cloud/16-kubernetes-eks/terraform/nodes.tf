@@ -84,6 +84,11 @@ resource "aws_eks_node_group" "base" {
     max_unavailable = 1
   }
 
+  # The cluster autoscaler owns the node count after the first apply
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
+  }
+
   depends_on = [aws_iam_role_policy_attachment.node, aws_eks_addon.vpc_cni, aws_eks_addon.kube_proxy, aws_eks_addon.pod_identity]
 }
 
@@ -111,6 +116,11 @@ resource "aws_eks_node_group" "spot" {
 
   update_config {
     max_unavailable = 1
+  }
+
+  # The cluster autoscaler owns the node count after the first apply
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
   }
 
   depends_on = [aws_iam_role_policy_attachment.node, aws_eks_addon.vpc_cni, aws_eks_addon.kube_proxy, aws_eks_addon.pod_identity]
