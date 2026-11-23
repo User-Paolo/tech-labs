@@ -29,13 +29,15 @@ spec:
           image: lab16-app
           imagePullPolicy: Always
           # 8 threads asking for /ready nonstop, so the database isn't part of it
+          # The name is looked up once, about 1 in 50 lookups failed after a 5 s wait
           command:
             - python
             - -c
             - |
-              import http.client, threading
+              import http.client, socket, threading
+              web = socket.gethostbyname("web")
               def hit():
-                  c = http.client.HTTPConnection("web", 80, timeout=5)
+                  c = http.client.HTTPConnection(web, 80, timeout=5)
                   while True:
                       try:
                           c.request("GET", "/ready")
