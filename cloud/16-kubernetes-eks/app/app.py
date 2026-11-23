@@ -103,4 +103,6 @@ class Handler(BaseHTTPRequestHandler):
 
 # PID 1 ignores SIGTERM without a handler, so Kubernetes had to wait 30 s and kill it
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+# The default queue of 5 dropped new connections under load
+ThreadingHTTPServer.request_queue_size = 128
 ThreadingHTTPServer(("", 8080), Handler).serve_forever()
