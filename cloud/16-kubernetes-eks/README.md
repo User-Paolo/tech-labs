@@ -419,3 +419,94 @@ With version 6 it scaled the way it should:
 ![Scaling down after the load stopped](images/39-scale-down.png)
 
 The CPU was at 2% within a minute, but the pods stayed at 20 until 17:26:44, about 5 minutes later, the same wait as on my PC in step 9. After that the HPA kept stepping down and the cluster autoscaler took the extra nodes away over the next hour. The dashboard in step 19 shows the whole week.
+
+### 14. What the week really cost
+After 4 days I grouped Cost Explorer by service and by usage type, leaving out the credits so the real numbers show:
+
+![The cost by service and by usage type](images/40-cost-by-usage.png)
+
+About $33.50 for November 20 to 23, so $8.40 a day. My estimate in step 2 was about $12 a day, so the week came out cheaper, and for a reason I didn't expect. The two normal `t4g.small` nodes aren't on the bill at all. The Free plan covers them, and only the Spot ones show up, at less than a dollar together.
+
+CloudWatch cost more than the cluster itself, $13.98 against $7.67. Half of it is `CW:ObservationUsage`, which is Container Insights charging for every metric it collects from every pod and node. The other half is `VendedLog-Bytes`, logs that AWS services write into CloudWatch for me, at $0.50 per GB. The biggest log group answered where those came from:
+
+![The log groups by size](images/41-log-groups.png)
+
+The flow logs were 5 times the size of the control plane logs. My guess is the load test made them that big. The app answers with HTTP/1.0, which closes the connection after every response, so every request from the load pods was a new connection, and flow logs write a record for each one. In step 2 I guessed about $10 for monitoring and the detection setup for the whole week, and CloudWatch alone went past that in 4 days.
+
+I left everything on, because the credits covered it and the detection part needs those logs. By November 26 the month was at $52.94:
+
+![The cost summary on November 26](images/42-cost-summary.png)
+
+The 8,585% only compares it to October, when the account cost 61 cents.
+
+### 15. Losing a Spot node
+When AWS takes a Spot instance back, the node group gets a warning and drains the node, which moves its pods somewhere else. I did the same drain by hand on the Spot node with the most web pods, while a loop called the load balancer 5 times a second.
+
+The first run was with 12 load pods still going:
+
+![The first drain with the load still on](images/43-spot-drain-with-load.png)
+
+16 requests out of 226 failed, but the first one failed at 12:02:13, before the drain started at about 12:02:33, and they kept coming for 2 minutes after it was done. A run with no drain at all still lost 4 out of 137:
+```
+== codes ==
+      4 000
+    133 200
+== slowest 200s ==
+3.044775
+3.030521
+1.028819
+1.027128
+1.025887
+1.017048
+0.042275
+0.037453
+```
+The failures timed out after 5 seconds with 0 bytes, and the slow ones took 1 or 3 seconds. Those are the times Linux waits before sending a lost connection request again, so connections from the load balancer to the pods were still being dropped now and then. With the load off and the same pods and nodes, all 279 requests got through. So version 6 made it rarer and didn't remove it. Keeping connections open with HTTP/1.1 would be the real fix, and I didn't change the app again this week.
+
+So I ran the drain again with the load off:
+```
+$ kubectl drain $NODE --ignore-daemonsets --delete-emptydir-data --timeout=120s
+12:24:16
+node/<spot node> cordoned
+evicting pod lab16/web-64c6d49884-r66ss
+evicting pod lab16/web-64c6d49884-5lxsh
+evicting pod lab16/web-64c6d49884-gm5xx
+evicting pod lab16/web-64c6d49884-pwh56
+evicting pod lab16/web-64c6d49884-q7rhb
+pod/web-64c6d49884-5lxsh evicted
+pod/web-64c6d49884-q7rhb evicted
+pod/web-64c6d49884-r66ss evicted
+pod/web-64c6d49884-gm5xx evicted
+pod/web-64c6d49884-pwh56 evicted
+node/<spot node> drained
+12:24:34
+== results ==
+    691 200
+== slowest ==
+0.073428
+0.070689
+0.062862
+```
+All 691 requests worked and the slowest took 73 ms. 5 pods left the node at once in 18 seconds, and the load balancer never sent a request to one that was on its way out. There's no PodDisruptionBudget, so nothing stopped all 5 from leaving together, and it still held. The cluster autoscaler removed the empty nodes about 10 minutes later.
+
+### 16. Rotating the database password
+RDS manages the database password in Secrets Manager and changes it every 7 days on its own. The app reads the password each time it opens a new connection and keeps that connection open. I forced a rotation with `aws secretsmanager rotate-secret` while a loop called `/` twice a second, which counts a visit in the database every time, and then restarted the web pods so every pod would log in again:
+```
+== results ==
+ok: 444  db_error: 43  other: 0
+12:29:20 {"greeting": "hello from EKS", "version": "v2", "pod": "web-77565b99ff-jfbll", "secret_set": true, "visits": null, "db_error": "DatabaseError"}
+12:29:22 {"greeting": "hello from EKS", "version": "v2", "pod": "web-77565b99ff-p96nd", "secret_set": true, "visits": null, "db_error": "DatabaseError"}
+12:29:24 {"greeting": "hello from EKS", "version": "v2", "pod": "web-77565b99ff-kljjf", "secret_set": true, "visits": null, "db_error": "DatabaseError"}
+"visits": 39331
+"visits": 39774
+{
+    "rotated": "2026-11-24T12:30:03.718000+00:00"
+}
+```
+I asked for the rotation at 12:28:53 and restarted the pods at 12:29:00, thinking it was already done. It finished at 12:30:03. Splitting the results by pod showed what happened in between:
+
+![The errors split by pod, and a restart after the rotation](images/44-rotation-after.png)
+
+Every error came from the new pods, between 12:29:20 and 12:30:03. The old pods kept counting on the connections they already had, since PostgreSQL doesn't drop open sessions when the password changes. RDS changes the password in the database first and only then marks the new one as current in Secrets Manager, so a pod that logged in during that gap read the old password and got refused. Each one tried again on the next request and was fine once the rotation finished. A second restart after it was done gave 157 out of 157.
+
+So the app never needs a restart for a new password, and a pod that starts in the middle of a rotation gets about 40 seconds of errors and then recovers on its own. That gap comes with having one database user. The usual fixes are retrying the login a few times, or AWS's alternating users setup with two database users, so one of them always works.
