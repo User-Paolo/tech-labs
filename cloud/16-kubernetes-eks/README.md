@@ -510,3 +510,101 @@ I asked for the rotation at 12:28:53 and restarted the pods at 12:29:00, thinkin
 Every error came from the new pods, between 12:29:20 and 12:30:03. The old pods kept counting on the connections they already had, since PostgreSQL doesn't drop open sessions when the password changes. RDS changes the password in the database first and only then marks the new one as current in Secrets Manager, so a pod that logged in during that gap read the old password and got refused. Each one tried again on the next request and was fine once the rotation finished. A second restart after it was done gave 157 out of 157.
 
 So the app never needs a restart for a new password, and a pod that starts in the middle of a rotation gets about 40 seconds of errors and then recovers on its own. That gap comes with having one database user. The usual fixes are retrying the login a few times, or AWS's alternating users setup with two database users, so one of them always works.
+
+### 17. The canary key inside the cluster
+Step 8 tested the canary key from CloudShell. This time I made a new key straight into two variables, put it in a Secret called `leaked-aws-key` in `lab16`, as if someone had left it in the cluster, and started a pod with the AWS CLI that loads that Secret. The pod called `get-caller-identity` every 5 seconds, 12 times through `eu-west-1` and then 12 times through `us-east-1`, to test the guess from the end of step 8:
+```
+14:55:25 eu-west-1 works
+14:55:32 eu-west-1 works
+...
+14:56:34 eu-west-1 works
+14:56:40 eu-west-1 works
+14:56:47 us-east-1 works
+14:56:54 us-east-1 works
+14:57:00 us-east-1 An error occurred (InvalidClientTokenId) when calling the GetCallerIde
+14:57:07 us-east-1 An error occurred (InvalidClientTokenId) when calling the GetCallerIde
+...
+14:58:00 us-east-1 An error occurred (InvalidClientTokenId) when calling the GetCallerIde
+```
+The guess was right. The key worked 12 times through `eu-west-1` for over a minute and no email came. The first call through `us-east-1` set everything off:
+
+![The alert for the call from the pod](images/45-canary-alert.png)
+
+![The key locked 3 seconds later](images/46-canary-locked.png)
+
+The Lambda locked the key 3 seconds after the call. The call at 14:56:54 still worked and from 14:57:00 on it was refused, 13 seconds after the first use. Step 8 got 12, so my guess is that delay is just how long IAM takes. The lab 02 rules emailed the Lambda's three changes like in step 8. This time there were only 2 alerts for the canary, since a refused call can't be matched to the canary user. AWS turns the key down before it knows whose key it is.
+
+The alert says a lot about where the key was used. The tool line shows `installer#docker` and a kernel ending in `amzn2023.aarch64`, which is a container on one of my Graviton nodes, and the source IP was my NAT gateway:
+
+![CloudTrail in both regions and the NAT gateway check](images/47-cloudtrail-regions.png)
+
+CloudTrail did record all 12 calls in `eu-west-1`. So the gap is in the detection, and the logs had it the whole time. Fixing it would mean the same rule in every region, or forwarding read calls to `us-east-1` too, and I didn't build either one this week.
+
+One more thing from the emails. [reset-canary.sh](detection/reset-canary.sh) tries to detach the quarantine policies even when they aren't attached. Those calls fail, and the lab 02 rules still emailed me about them, so they catch failed IAM changes too.
+
+### 18. Failing over the database
+The database has a standby in the second zone, and step 6 was about making the app survive a database restart. RDS can switch to the standby on purpose with a forced failover, so I did that while a loop called `/` twice a second:
+```
+before: us-east-1b      us-east-1a      available
+15:03:51
+rebooting
+available again: 15:05:08
+== results ==
+ok: 534  db_error: 3  other: 0
+== error window ==
+15:03:55
+15:04:11
+      2 "db_error": "InterfaceError"
+      1 "db_error": "TimeoutError"
+== slowest ==
+15:03:55 10.276942
+15:04:12 5.261326
+15:04:06 5.183238
+15:04:20 0.213935
+15:04:18 0.178854
+after: us-east-1a       us-east-1b      available
+15:04:02        Multi-AZ instance failover started.
+15:04:19        DB instance restarted
+15:04:35        Multi-AZ instance failover completed
+15:04:35        The user requested a failover of the DB instance.
+```
+The two zones swapped places. The app had errors or slow answers from 15:03:55 to about 15:04:17, so a bit over 20 seconds, and then every pod had a new connection to the new primary with no restart. The loop waits for each answer before sending the next one, so it sent very few requests during those 20 seconds, and 3 errors makes it look smaller than it was. The app was back before RDS said the failover had finished at 15:04:35. The "available again" at 15:05:08 is late only because `aws rds wait` checks every 30 seconds.
+
+### 19. Grafana
+The `grafana` chart has moved to the `grafana-community` Helm repo, and the old repo marks it as deprecated. The new one has the same version 10.5.15 that my [values file](k8s/grafana-values.yaml) was written for. The admin password is random and lives in a Secret, and the role from step 10 lets Grafana read CloudWatch through Pod Identity:
+
+![Grafana installed and reading CloudWatch](images/48-grafana-install.png)
+
+My plan was to reach it with a port forward. CloudShell can't open a port in my browser, and a port forward from my PC needs AWS credentials on my PC, which I don't keep there. So for the screenshots I added a Service of type `LoadBalancer` that only my home IP could reach, and deleted it afterwards. It was plain HTTP, so I wouldn't leave it up. The dashboard is in [k8s/grafana-dashboard.json](k8s/grafana-dashboard.json), so it's in the repo like everything else:
+
+![The dashboard for the week](images/49-grafana-dashboard.png)
+
+The whole week is there. The overnight load on November 22 pushed web to its maximum of 40 pods and the nodes to 8. The spike on the 24th is the Spot test. Database connections follow the pod count, since every web pod keeps one connection open. The load balancer barely saw the big load, because the load pods called the `web` Service inside the cluster. It never answered with a 5xx itself all week. The few 5xx from the pods come at random times, even with nothing running. My guess is bots trying `POST` on the public load balancer, since Python's simple server answers any method it doesn't handle with 501.
+
+## What Broke and How I Fixed It
+
+**The Free plan refused my node type.** It only launches Free Tier instance types, and `t4g.large` isn't one. Step 1 checked EKS and missed this. Both node groups use `t4g.small` now, the biggest Free Tier ARM type.
+
+**Spot had no capacity.** AWS had no spare `t4g.small` in one of my zones. The Spot group can use `t9g.small` too now, which has the same size.
+
+**A failed node group stayed behind.** The apply was cut off while the Spot group was failing, so AWS kept it and Terraform never saved it. I deleted it with the AWS CLI before applying again.
+
+**CloudShell timed out in the middle of the first apply.** After that its credentials failed with a 500 error until I signed out of the console and back in. Every new CloudShell session also needs `terraform init` again and an apply for its new IP, since the cluster API only accepts the address in `admin_cidrs`.
+
+**`rds.force_ssl` showed up as a change in every plan.** RDS saves that parameter to apply after a reboot, and Terraform kept trying to apply it right away. Setting `apply_method = "pending-reboot"` in [rds.tf](terraform/rds.tf) stopped it.
+
+**Container Insights put tracing into every pod.** Application Signals is on by default in the addon, and the pods kept getting killed until I turned it off in [monitoring.tf](terraform/monitoring.tf).
+
+**Pods took 30 seconds to stop.** The app ignored `SIGTERM` as process 1. Version 5 handles it, and the 15 second `preStop` pause lets the load balancer catch up.
+
+**Terraform and the cluster autoscaler fought over the node count.** The node groups ignore `desired_size` after the first apply now.
+
+**The app dropped new connections under load.** The queue of 5 was too small, and version 6 raised it to 128. About 3% of requests through the load balancer still timed out while the load ran, since every request opens a new connection. HTTP/1.1 with connections kept open should fix it, and I didn't change the app again.
+
+**Some DNS lookups failed after 5 seconds.** This only happened inside the Alpine based load pods, so the load script looks up the name once.
+
+**New pods couldn't log in during a password rotation.** For about 40 seconds the database already had the new password while Secrets Manager still gave out the old one. The app recovered on its own, and two database users would close the gap.
+
+**The canary rule only watches one region.** Using the key through `eu-west-1` went unseen. CloudTrail has the calls, and the rule needs to be in every region to catch them.
+
+**The flow logs cost more than I thought.** HTTP/1.0 made every request of the load test its own connection, and the flow logs had 3.8 GB after 4 days.

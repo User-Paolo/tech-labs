@@ -1,0 +1,244 @@
+{
+  "uid": "lab16",
+  "title": "lab16",
+  "tags": [
+    "lab16"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-4d",
+    "to": "now"
+  },
+  "refresh": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Nodes",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "ContainerInsights",
+          "metricName": "cluster_node_count",
+          "dimensions": {
+            "ClusterName": "lab16"
+          },
+          "statistic": "Maximum",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "cluster_node_count"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Running web pods",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "ContainerInsights",
+          "metricName": "service_number_of_running_pods",
+          "dimensions": {
+            "ClusterName": "lab16",
+            "Namespace": "lab16",
+            "Service": "web"
+          },
+          "statistic": "Maximum",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "service_number_of_running_pods"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Node CPU",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "ContainerInsights",
+          "metricName": "node_cpu_utilization",
+          "dimensions": {
+            "ClusterName": "lab16"
+          },
+          "statistic": "Average",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "node_cpu_utilization"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Requests through the load balancer",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "RequestCount",
+          "dimensions": {
+            "LoadBalancer": "*"
+          },
+          "statistic": "Sum",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "RequestCount"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Errors from the load balancer and the pods",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_ELB_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": "*"
+          },
+          "statistic": "Sum",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "HTTPCode_ELB_5XX_Count"
+        },
+        {
+          "refId": "B",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_Target_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": "*"
+          },
+          "statistic": "Sum",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "HTTPCode_Target_5XX_Count"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Database connections",
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "DBInstanceIdentifier": "lab16"
+          },
+          "statistic": "Average",
+          "period": "",
+          "region": "default",
+          "matchExact": true,
+          "label": "DatabaseConnections"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}
