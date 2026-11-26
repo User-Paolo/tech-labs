@@ -174,7 +174,7 @@ Everything for EKS is in [terraform/](terraform/), written and checked before an
 |---|---|
 | [network.tf](terraform/network.tf) | A VPC in 2 zones, with public subnets for load balancers and private subnets for the nodes and pods. One NAT gateway lets the nodes reach the internet. A real setup would have one per zone, but that doubles the cost |
 | [eks.tf](terraform/eks.tf) | The cluster on 1.37, kept on standard support, with Secrets encrypted by my own KMS key and all the control plane logs in CloudWatch for 7 days. The network plugin has network policies switched on, since on EKS that's off by default |
-| [nodes.tf](terraform/nodes.tf) | Two groups of ARM nodes, 2 normal `t4g.large` and 2 Spot ones that can be any of 3 types with the same size. Pods can't reach the nodes' own AWS credentials |
+| [nodes.tf](terraform/nodes.tf) | Two groups of ARM nodes, 2 normal `t4g.small` and 2 Spot ones that can be `t4g.small` or `t9g.small`, which have the same size. Pods can't reach the nodes' own AWS credentials |
 | [ecr.tf](terraform/ecr.tf) | A private registry for my image. Tags can't be overwritten and every push gets scanned |
 | [lb-controller.tf](terraform/lb-controller.tf) | The role for the AWS Load Balancer Controller, which turns a Kubernetes ingress into a real load balancer. The policy is the official one from the controller's repo at v3.6.2, and only the controller's own service account can use the role |
 
@@ -341,3 +341,81 @@ The last gap from [lab 15](../15-leaked-key/) was that downloading a file from S
 I downloaded it at 04:37:38 and the email had the event at 04:37:39. This rule is in the normal `ENABLED` state and still got the download, so the special state from step 8 only matters for management events like `get-caller-identity`. Data events reach EventBridge anyway once a trail logs them.
 
 [reset-canary.sh](detection/reset-canary.sh) puts the canary user from step 8 back the way Terraform made it, with no keys and no quarantine policies, so it's ready for the paid week.
+
+### 11. The paid week, day 1
+The first apply on November 20 made the cluster and the database fine, and then both node groups failed after 34 minutes:
+
+![Both node groups failing](images/28-node-group-errors.png)
+
+The normal group was refused because `t4g.large` isn't a Free Tier type. Step 1 only checked that the Free plan allows EKS itself, and I never checked which machines it would start for the nodes. It turns out the Free plan only launches Free Tier types, and the biggest ARM ones are `t4g.small` and `t9g.small`, with 2 vCPUs and 2 GiB each:
+
+![The Free Tier instance types](images/29-free-tier-types.png)
+
+So both groups went down to `t4g.small`. The next day the Spot group failed again, this time because AWS had no spare `t4g.small` capacity in `us-east-1b`. `t9g.small` is offered in both of my zones and was a bit cheaper, so the Spot group can now use either one:
+
+![The Spot error, the zones and the Spot prices](images/30-spot-capacity.png)
+
+The plan wanted to create the Spot group, because the failed one was still in AWS and Terraform had never saved it. I deleted it with `aws eks delete-nodegroup` first, and the apply after that added it cleanly:
+
+![The nodes running](images/31-nodes-running.png)
+
+Two normal `t4g.small` nodes and two Spot ones, one of each type, spread over both zones.
+
+CloudShell runs on x86 and the nodes are ARM. My libraries are plain Python, so the [Dockerfile](app/Dockerfile) installs them on the build machine and only copies them into the ARM image, which means no emulator is needed. A check stops the build if a library ever brings compiled code for the wrong CPU. The image went to ECR as `v4`, and then the load balancer controller went in with Helm:
+
+![The load balancer controller installed](images/32-lb-controller.png)
+
+Then I ran the deploy script and the pods never got ready:
+
+![Pods restarting with exit code 137](images/33-app-signals-restarts.png)
+
+The readiness check said 503, but the app's own log shows the checks getting 200. The pod also had a lot of `OTEL_` variables and init containers I never wrote. The Container Insights addon from step 10 turns on Application Signals by default in version 8.0.0, and that puts OpenTelemetry into every pod for Java, Node.js, Python and .NET. Every pod had restarted 5 times with exit code 137, which means it was killed, and it wasn't out of memory. I didn't dig into why the instrumented app failed its checks. I turned it off in [monitoring.tf](terraform/monitoring.tf) with `monitorAllServices = false` and restarted the pods:
+```
+$ kubectl -n lab16 get pods
+NAME                   READY   STATUS    RESTARTS   AGE
+web-545c66bdf4-gmclp   1/1     Running   0          2m34s
+web-545c66bdf4-vz6n5   1/1     Running   0          2m19s
+web-545c66bdf4-zndd6   1/1     Running   0          2m50s
+$ for i in 1 2 3 4; do curl -s --max-time 10 http://$alb/; echo; done
+{"greeting": "hello from EKS", "version": "v2", "pod": "web-545c66bdf4-zndd6", "secret_set": true, "visits": 2}
+{"greeting": "hello from EKS", "version": "v2", "pod": "web-545c66bdf4-gmclp", "secret_set": true, "visits": 3}
+{"greeting": "hello from EKS", "version": "v2", "pod": "web-545c66bdf4-vz6n5", "secret_set": true, "visits": 4}
+{"greeting": "hello from EKS", "version": "v2", "pod": "web-545c66bdf4-zndd6", "secret_set": true, "visits": 5}
+```
+That's the whole chain working. The load balancer sends each request to one of the three pods, and each pod counts the visit in RDS over TLS, logged in with the password it reads from Secrets Manager through Pod Identity.
+
+### 12. Pods that stop cleanly
+Deleting a pod took 30 seconds every time. The app runs as process 1 in its container, and process 1 ignores `SIGTERM` unless the program handles it, so Kubernetes waited the whole grace period and then killed it. That's also where the exit code 137 above came from. Version 5 of [app.py](app/app.py) exits on `SIGTERM`, and the deployment got a `preStop` pause, so the pod keeps answering while the load balancer takes it out of its list. With a 5 second pause I still lost 2 requests out of 120, so I raised it to 15:
+
+![Deleting a pod during 160 requests, and 160 requests with no delete](images/34-clean-stop.png)
+
+The pod stopped in 17 seconds, which is the 15 second pause plus the app exiting. One request out of 160 failed at 14:55:36, and the run without a delete got all 160. The new pod that replaced the deleted one became ready at 14:55:30, so my guess is the miss had to do with it joining the load balancer. Step 15 has a cleaner result with 5 pods leaving at once.
+
+### 13. Scaling across nodes
+EKS doesn't come with metrics-server, so it's an addon in [eks.tf](terraform/eks.tf) now, and the HorizontalPodAutoscaler from step 9 can read pod CPU. The cluster autoscaler went in with Helm and found both node groups by their tags:
+
+![The cluster autoscaler installed](images/35-cluster-autoscaler.png)
+
+The load is a Deployment in [k8s/eks/load.yaml](k8s/eks/load.yaml) with 8 threads asking `/ready` nonstop, so the database isn't part of it. It starts at 0 and I scale it up by hand. I let 3 load pods run overnight, and web went to the maximum of 40 pods on 8 nodes, 10 for a short while.
+
+The next day the cluster autoscaler had brought the Spot group down to 0, and Terraform wanted to put it back to 2 when I reconnected. Both of them were setting the same number, so the node groups now ignore `desired_size` after the first apply and the cluster autoscaler owns it.
+
+Then a cleaner test with 12 load pods:
+
+![New nodes for the waiting pods](images/36-new-nodes.png)
+
+9 pods were waiting for room at 16:33:25, the cluster autoscaler asked for 2 more nodes right away, and at 16:34:39 everything was placed. That part worked. The odd part was the HPA staying at 17 pods with the CPU between 28 and 48%, under its target of 50%. The load pods were barely using any CPU, so they were waiting on something:
+
+![The load pods barely working](images/37-load-pods.png)
+
+DNS wasn't it, since calling by IP was no faster. The real limit was in the app. Python's simple server only queues 5 new connections, and every request from the load pods is a new connection, so the extra ones got dropped and retried after 1 or 3 seconds. Measured on my PC with 8 clients, version 5 had 18 slow requests out of 4231 and version 6, with a queue of 128, had none out of 5947. I also found that about 1 in 50 name lookups inside the load pods failed after a 5 second wait. My guess is a known race in how Alpine's C library sends its DNS queries. The load script now looks up the name once at the start.
+
+With version 6 it scaled the way it should:
+
+![Scaling up with version 6](images/38-scale-v6.png)
+
+7, then 9, then 17, then 20 pods in under 3 minutes, and it stayed at 20 with the 6 nodes it already had. Then I stopped the load:
+
+![Scaling down after the load stopped](images/39-scale-down.png)
+
+The CPU was at 2% within a minute, but the pods stayed at 20 until 17:26:44, about 5 minutes later, the same wait as on my PC in step 9. After that the HPA kept stepping down and the cluster autoscaler took the extra nodes away over the next hour. The dashboard in step 19 shows the whole week.
