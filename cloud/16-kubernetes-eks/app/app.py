@@ -64,6 +64,11 @@ def count_visit():
 
 
 class Handler(BaseHTTPRequestHandler):
+    # HTTP/1.0 closed the connection after every answer
+    protocol_version = "HTTP/1.1"
+    # Longer than the ALB's 60 s, so the ALB is the one that closes idle connections
+    timeout = 75
+
     def reply(self, code, body):
         data = json.dumps(body).encode()
         self.send_response(code)
