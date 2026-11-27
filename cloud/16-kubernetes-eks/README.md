@@ -461,7 +461,7 @@ The first run was with 12 load pods still going:
 0.042275
 0.037453
 ```
-The failures timed out after 5 seconds with 0 bytes, and the slow ones took 1 or 3 seconds. Those are the times Linux waits before sending a lost connection request again, so connections from the load balancer to the pods were still being dropped now and then. With the load off and the same pods and nodes, all 279 requests got through. So version 6 made it rarer and didn't remove it. Keeping connections open with HTTP/1.1 would be the real fix, and I didn't change the app again this week.
+The failures timed out after 5 seconds with 0 bytes, and the slow ones took 1 or 3 seconds. Those are the times Linux waits before sending a lost connection request again, so connections from the load balancer to the pods were still being dropped now and then. With the load off and the same pods and nodes, all 279 requests got through. So version 6 made it rarer and didn't remove it. Keeping connections open with HTTP/1.1 would be the real fix, and step 20 tries it.
 
 So I ran the drain again with the load off:
 ```
@@ -581,6 +581,35 @@ My plan was to reach it with a port forward. CloudShell can't open a port in my 
 
 The whole week is there. The overnight load on November 22 pushed web to its maximum of 40 pods and the nodes to 8. The spike on the 24th is the Spot test. Database connections follow the pod count, since every web pod keeps one connection open. The load balancer barely saw the big load, because the load pods called the `web` Service inside the cluster. It never answered with a 5xx itself all week. The few 5xx from the pods come at random times, even with nothing running. My guess is bots trying `POST` on the public load balancer, since Python's simple server answers any method it doesn't handle with 501.
 
+### 20. Keeping connections open
+Steps 14 and 15 both came back to the same thing. The app answered with HTTP/1.0, so every request was a new connection, and that gave me the timeouts through the load balancer and most of the flow log bill. Version 7 of [app.py](app/app.py) answers with HTTP/1.1 and keeps the connection open for the next request. An idle connection closes after 75 seconds, longer than the load balancer's 60, so the load balancer always closes first and never sends a request into a connection the app is closing.
+
+On November 27 I ran the same 12 load pods on version 6 first, then rolled out version 7 with the load still on. On each version I checked the load balancer for 2 minutes like in step 15, and counted the requests the web pods logged in one minute:
+
+| Same 12 load pods | Version 6 | Version 7 |
+|---|---|---|
+| Checks through the load balancer | 301, 8 timed out | 557, all 200 |
+| Slowest answer | 5 s | 49 ms |
+| Requests the web pods answered in a minute | 40,617 | 112,373 |
+| Web pods | 29 | 18 |
+| CPU of all the load pods together | 51m | 338m |
+
+The timeouts are gone. The load pods also got almost 3 times as many requests through with fewer web pods, because they stopped waiting on new connections and did actual work. The flow logs, 5 minutes at a time:
+
+| 5 minutes from | Running | Bytes | Records |
+|---|---|---|---|
+| 21:10 | no load | 308,324 | 2,236 |
+| 21:20 | version 6 with the load | 48,339,949 | 349,975 |
+| 21:45 | version 7 with the load | 2,410,627 | 17,387 |
+
+About 20 times smaller while answering almost 3 times the requests. At the version 6 rate the load alone would have written about 14 GB a day, around $7 at $0.50 per GB. My guess is that explains most of the 3.8 GB from step 14, since the load only ran for part of those days.
+
+There was one thing I half expected. These are the requests each of the 18 web pods answered in the minute before the check:
+```
+20185 19852 18830 11661 11621 9385 8292 4039 3665 2383 2360 1363 198 49 38 38 37 30
+```
+A Service picks a pod when a connection opens. The load's 96 connections now stay open, so they stay on whichever pods they reached first. The autoscaler went down to 13 pods at 21:40 and back up to 18 at 21:46, and my guess is the ones at the bottom are those 5 new pods, getting only my checks and the health checks. The load balancer picks a pod for every request, so only callers inside the cluster have this problem. It also fools the autoscaler, since it averages the CPU over every pod, busy or idle. The app could close each connection after a minute or so to make clients connect again and spread out. I left that for another time.
+
 ## What Broke and How I Fixed It
 
 **The Free plan refused my node type.** It only launches Free Tier instance types, and `t4g.large` isn't one. Step 1 checked EKS and missed this. Both node groups use `t4g.small` now, the biggest Free Tier ARM type.
@@ -599,7 +628,7 @@ The whole week is there. The overnight load on November 22 pushed web to its max
 
 **Terraform and the cluster autoscaler fought over the node count.** The node groups ignore `desired_size` after the first apply now.
 
-**The app dropped new connections under load.** The queue of 5 was too small, and version 6 raised it to 128. About 3% of requests through the load balancer still timed out while the load ran, since every request opens a new connection. HTTP/1.1 with connections kept open should fix it, and I didn't change the app again.
+**The app dropped new connections under load.** The queue of 5 was too small, and version 6 raised it to 128. About 3% of requests through the load balancer still timed out while the load ran, since every request opened a new connection. Version 7 keeps connections open with HTTP/1.1, and that fixed it.
 
 **Some DNS lookups failed after 5 seconds.** This only happened inside the Alpine based load pods, so the load script looks up the name once.
 
@@ -607,4 +636,6 @@ The whole week is there. The overnight load on November 22 pushed web to its max
 
 **The canary rule only watches one region.** Using the key through `eu-west-1` went unseen. CloudTrail has the calls, and the rule needs to be in every region to catch them.
 
-**The flow logs cost more than I thought.** HTTP/1.0 made every request of the load test its own connection, and the flow logs had 3.8 GB after 4 days.
+**The flow logs cost more than I thought.** HTTP/1.0 made every request of the load test its own connection, and the flow logs had 3.8 GB after 4 days. With version 7 the same load wrote about 20 times less.
+
+**Open connections stayed on the old pods.** With version 7 the pods the autoscaler added got almost none of the load from inside the cluster. Closing each connection after a while would spread it out again.
